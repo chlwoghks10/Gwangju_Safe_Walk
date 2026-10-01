@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#141B36">
+
+    <TextView
+        android:layout_width="96dp"
+        android:layout_height="96dp"
+        android:background="@drawable/bg_circle"
+        android:backgroundTint="#FFC85C"
+        android:gravity="center"
+        android:text="🌙"
+        android:textSize="44sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="광주 안심길"
+        android:textColor="#FFFFFF"
+        android:textSize="30sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="대학가 야간 보행 경로 안내"
+        android:textColor="#AEB8D4"
+        android:textSize="15sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="60dp"
+        android:text="익셉션"
+        android:textColor="#5C6890"
+        android:textSize="13sp" />
+</LinearLayout>
