@@ -40,9 +40,7 @@
 ---
 
 ## 현재까지 구현
-<img width="1440" height="2938" alt="image" src="https://github.com/user-attachments/assets/eefeb621-ab60-474f-b6e9-63186a957c91" />
-<img width="1440" height="2938" alt="image" src="https://github.com/user-attachments/assets/ffa75d6c-6b26-49cc-965b-8339e421beb1" />
-<img width="1440" height="2938" alt="image" src="https://github.com/user-attachments/assets/be16e33f-c4af-40cc-b149-2c5886bd1358" />
+| <img width="240" src="https://github.com/user-attachments/assets/eefeb621-ab60-474f-b6e9-63186a957c91" /> | <img width="240" src="https://github.com/user-attachments/assets/ffa75d6c-6b26-49cc-965b-8339e421beb1" /> | <img width="240" src="https://github.com/user-attachments/assets/be16e33f-c4af-40cc-b149-2c5886bd1358" /> |
 
 ### 1. 공공데이터 수집 및 정제
 
