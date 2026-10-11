@@ -42,7 +42,6 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <!-- 출발 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -77,7 +76,6 @@
                 android:layout_marginStart="19dp"
                 android:background="@color/divider" />
 
-            <!-- 도착 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -135,7 +133,6 @@
         android:paddingTop="10dp"
         android:paddingBottom="20dp">
 
-        <!-- 손잡이 -->
         <View
             android:layout_width="38dp"
             android:layout_height="4dp"
@@ -144,92 +141,113 @@
             android:background="@drawable/bg_pill"
             android:backgroundTint="@color/stroke" />
 
-        <!-- 경로 비교 -->
+        <!-- ───── 경로 비교 세 줄 ───── -->
         <LinearLayout
             android:id="@+id/compareBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:visibility="gone"
-            android:weightSum="2">
+            android:orientation="vertical"
+            android:visibility="gone">
 
+            <!-- 최단 -->
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="5dp"
-                android:layout_weight="1"
                 android:background="@drawable/bg_card"
-                android:orientation="vertical"
-                android:padding="14dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="12dp">
 
-                <LinearLayout
-                    android:layout_width="wrap_content"
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="34dp"
+                    android:background="@color/fac_cctv" />
+
+                <TextView
+                    android:layout_width="62dp"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:layout_width="14dp"
-                        android:layout_height="4dp"
-                        android:background="@color/fac_cctv" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="7dp"
-                        android:text="최단 경로"
-                        android:textColor="@color/fac_cctv"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
+                    android:layout_marginStart="10dp"
+                    android:text="최단"
+                    android:textColor="@color/fac_cctv"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/txtShort"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:lineSpacingExtra="4dp"
+                    android:layout_weight="1"
+                    android:lineSpacingExtra="3dp"
                     android:text="-"
                     android:textColor="@color/text_sub"
                     android:textSize="12sp" />
             </LinearLayout>
 
+            <!-- 안심 A -->
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="5dp"
-                android:layout_weight="1"
+                android:layout_marginTop="7dp"
                 android:background="@drawable/bg_card"
-                android:orientation="vertical"
-                android:padding="14dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="12dp">
 
-                <LinearLayout
-                    android:layout_width="wrap_content"
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="34dp"
+                    android:background="@color/fac_police" />
+
+                <TextView
+                    android:layout_width="62dp"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:layout_width="14dp"
-                        android:layout_height="4dp"
-                        android:background="@color/fac_police" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="7dp"
-                        android:text="안심 경로"
-                        android:textColor="@color/fac_police"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
+                    android:layout_marginStart="10dp"
+                    android:text="안심 A"
+                    android:textColor="@color/fac_police"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/txtSafe"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:lineSpacingExtra="4dp"
+                    android:layout_weight="1"
+                    android:lineSpacingExtra="3dp"
+                    android:text="-"
+                    android:textColor="@color/text_sub"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 안심 B -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:background="@drawable/bg_card"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="12dp">
+
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="34dp"
+                    android:background="#7C5CE0" />
+
+                <TextView
+                    android:layout_width="62dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:text="안심 B"
+                    android:textColor="#7C5CE0"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/txtSafe2"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:lineSpacingExtra="3dp"
                     android:text="-"
                     android:textColor="@color/text_sub"
                     android:textSize="12sp" />
