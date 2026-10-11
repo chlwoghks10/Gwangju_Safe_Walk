@@ -40,7 +40,7 @@
 ---
 
 ## 현재까지 구현
-| 홈 | 안심지도 | 안심경로 | 메뉴 |
+| 홈 | 메뉴 | 안심지도 | 안심경로 |
 |:---:|:---:|:---:|:---:|
 | <img src="https://github.com/user-attachments/assets/c31b7c0c-1695-4acc-b078-95ea40d53204" width="200"> | <img src="https://github.com/user-attachments/assets/e765a465-656f-45dc-b6ec-fd13b87ee17e" width="200"> | <img src="https://github.com/user-attachments/assets/4c009279-e68a-4c25-bf19-60fe0da4e1db" width="200"> | <img src="https://github.com/user-attachments/assets/c91436ab-855e-47a6-b69d-470bc6ca4f61" width="200"> |
 
