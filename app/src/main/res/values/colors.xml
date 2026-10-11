@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 주간 -->
+    <color name="bg_page">#F4F6FA</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_sub">#F2F5FA</color>
+    <color name="stroke">#E6EAF2</color>
+    <color name="divider">#EFF2F7</color>
+
+    <color name="text_main">#141B2D</color>
+    <color name="text_sub">#5C6880</color>
+    <color name="text_weak">#8992A8</color>
+
+    <color name="brand">#2E5CE6</color>
+    <color name="brand_deep">#1E44B8</color>
+    <color name="on_brand">#FFFFFF</color>
+    <color name="brand_soft">#E7EDFD</color>
+
+    <color name="fac_cctv">#1F6FEB</color>
+    <color name="fac_light">#E29228</color>
+    <color name="fac_bell">#D64545</color>
+    <color name="fac_police">#2E8C60</color>
+
+    <color name="icon_tint">#4A556E</color>
+    <color name="scrim">#CCFFFFFF</color>
+</resources>
