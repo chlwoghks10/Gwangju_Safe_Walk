@@ -47,7 +47,7 @@
 
 | 경로 비교 결과 | 시설 표시 | 시작 화면 | 야간 화면 |
 |:---:|:---:|:---:|:---:|
-| <img src="https://github.com/user-attachments/assets/fc96ce9e-f4cc-406e-b910-ca296046f7a9" width="200"> | <img src="https://github.com/user-attachments/assets/900fbe52-6b57-4f04-b49f-b0aff8f5cfa0" width="200"> | <img src="https://github.com/user-attachments/assets/cc553abd-3c7c-447e-8652-1a79b8ab5f62" width="200"> | <img src="https://github.com/user-attachments/assets/573c03dd-ea11-4ff1-a5c2-e7e70f8a5b7d" width="200"> |
+| <img src="https://github.com/user-attachments/assets/9557488c-0e36-4d40-b66c-0b0aa2815803" width="200"> | <img src="https://github.com/user-attachments/assets/900fbe52-6b57-4f04-b49f-b0aff8f5cfa0" width="200"> | <img src="https://github.com/user-attachments/assets/cc553abd-3c7c-447e-8652-1a79b8ab5f62" width="200"> | <img src="https://github.com/user-attachments/assets/573c03dd-ea11-4ff1-a5c2-e7e70f8a5b7d" width="200"> |
 
 ### 1. 공공데이터 수집 및 정제
 
