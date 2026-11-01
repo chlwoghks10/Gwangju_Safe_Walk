@@ -102,6 +102,19 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private Voice voice;
 
+    // 안내 지점 몇 m 앞에서 읽어 줄지 (팀장 voiceGuide.js 의 TRIGGER_M 과 같은 값)
+    private static final double TRIGGER_M = 30;
+    private boolean guiding = false;
+    private int nextTurn = 0;
+
+    private static class Turn {
+        final double lat, lon;
+        final String text;
+        Turn(double lat, double lon, String text) {
+            this.lat = lat; this.lon = lon; this.text = text;
+        }
+    }
+
     private static class RouteInfo {
         String name;
         int color;
@@ -110,6 +123,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         double lengthM;
         double extraM;
         int[] fac = new int[4];
+        List<Turn> turns = new ArrayList<>();
         boolean sameAsShortest;
         PathOverlay overlay;
 
@@ -284,6 +298,8 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     }
 
     private void onLocationChanged(@NonNull Location loc) {
+        checkGuide(loc);
+
         // 버튼을 누른 직후 한 번만 쓴다. 계속 덮어쓰면 출발지가 따라 움직인다
         if (wantMyLocation == WANT_NONE) return;
         int target = wantMyLocation;
@@ -370,7 +386,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
         tabBox.removeAllViews();
         routeTabs.setVisibility(View.GONE);
-        if (voice != null) voice.stop();
+        stopGuide();
     }
 
     private static final int REQ_SEARCH_START = 2001;
@@ -496,6 +512,27 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
             clearRoutes();
 
+            // 서버는 탭한 지점을 가장 가까운 도로 위로 옮겨 경로를 만든다.
+            // 마커도 같이 옮기지 않으면 마커와 경로선이 떨어져 보인다.
+            JSONObject snap = json.optJSONObject("snap");
+            if (snap != null) {
+                JSONArray s0 = snap.optJSONArray("start");
+                JSONArray e0 = snap.optJSONArray("end");
+                if (s0 != null && s0.length() == 2 && startMarker != null) {
+                    startMarker.setPosition(new LatLng(s0.getDouble(0), s0.getDouble(1)));
+                }
+                if (e0 != null && e0.length() == 2 && endMarker != null) {
+                    endMarker.setPosition(new LatLng(e0.getDouble(0), e0.getDouble(1)));
+                }
+                double off = Math.max(snap.optDouble("start_off_m", 0),
+                                      snap.optDouble("end_off_m", 0));
+                if (off >= 40) {
+                    Toast.makeText(this,
+                            String.format("도로에서 %.0fm 떨어진 지점이라 가까운 길 위에서 안내합니다", off),
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+
             double shortestM = sh.getDouble("length_m");
 
             routes.add(build("최단",   COLOR_SHORT, sh, shortestM, false));
@@ -543,6 +580,16 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         r.extraM = r.lengthM - shortestM;
         r.sameAsShortest = same;
         for (int i = 0; i < FAC_KEYS.length; i++) r.fac[i] = o.optInt(FAC_KEYS[i], 0);
+
+        JSONArray ta = o.optJSONArray("turns");
+        if (ta != null) {
+            for (int i = 0; i < ta.length(); i++) {
+                JSONObject t = ta.optJSONObject(i);
+                if (t == null) continue;
+                r.turns.add(new Turn(t.optDouble("lat", 0), t.optDouble("lon", 0),
+                        t.optString("text", "")));
+            }
+        }
         return r;
     }
 
@@ -599,6 +646,9 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             r.overlay.setWidth(dp(on ? 7 : 3));
             r.overlay.setZIndex(on ? 100 : 0);
         }
+
+        nextTurn = 0;
+        if (guiding) paintGuideButton();
 
         drawFacilities(routes.get(selected).json);
         updateDetail();
@@ -660,15 +710,61 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private void startGuide() {
         if (routes.isEmpty()) return;
+        if (guiding) { stopGuide(); return; }
+
         RouteInfo r = routes.get(selected);
+        guiding = true;
+        nextTurn = 0;
+
+        // 걷는 동안 위치가 계속 들어와야 안내 지점을 지나는지 알 수 있다
+        if (naverMap != null) naverMap.setLocationTrackingMode(LocationTrackingMode.Follow);
 
         voice.say(r.name + " 경로로 안내를 시작합니다. 총 "
                 + Voice.distanceText(r.lengthM) + ", 도보 " + r.minutes() + "분입니다.", true);
-        voice.say("300미터 앞 좌회전입니다.");
-        voice.say("경로를 이탈했습니다. 경로를 다시 찾습니다.");
 
-        Toast.makeText(this, "소리가 나지 않으면 폰 볼륨(미디어)을 올려 보세요",
-                Toast.LENGTH_SHORT).show();
+        if (r.turns.isEmpty()) {
+            Toast.makeText(this, "이 경로에는 회전 안내 정보가 없습니다", Toast.LENGTH_SHORT).show();
+        }
+        paintGuideButton();
+    }
+
+    private void stopGuide() {
+        guiding = false;
+        nextTurn = 0;
+        if (voice != null) voice.stop();
+        if (naverMap != null) naverMap.setLocationTrackingMode(LocationTrackingMode.NoFollow);
+        paintGuideButton();
+    }
+
+    private void paintGuideButton() {
+        if (!guiding) { btnGuide.setText("안내 시작"); return; }
+        List<Turn> ts = routes.isEmpty() ? null : routes.get(selected).turns;
+        int total = (ts == null) ? 0 : ts.size();
+        btnGuide.setText(total == 0 ? "안내 중지"
+                : "안내 중지 (" + Math.min(nextTurn + 1, total) + "/" + total + ")");
+    }
+
+    /**
+     * 걷는 동안 위치가 들어올 때마다, 다음 안내 지점까지 거리를 재서 가까워지면 읽어 준다.
+     * 팀장이 준 voiceGuide.js 의 onPosition 과 같은 방식이다.
+     */
+    private void checkGuide(Location loc) {
+        if (!guiding || routes.isEmpty()) return;
+        List<Turn> ts = routes.get(selected).turns;
+        if (nextTurn >= ts.size()) return;
+
+        Turn t = ts.get(nextTurn);
+        float[] out = new float[1];
+        Location.distanceBetween(loc.getLatitude(), loc.getLongitude(), t.lat, t.lon, out);
+        if (out[0] > TRIGGER_M) return;
+
+        String msg = (int) TRIGGER_M + "미터 앞 " + t.text + "입니다.";
+        voice.say(msg, true);
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+        nextTurn++;
+        paintGuideButton();
+
+        if (nextTurn >= ts.size()) voice.say("안내를 마칩니다.");
     }
 
     private void drawFacilities(JSONObject route) {
@@ -724,6 +820,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     @Override
     protected void onDestroy() {
+        guiding = false;
         io.shutdownNow();
         if (voice != null) voice.shutdown();
         super.onDestroy();
