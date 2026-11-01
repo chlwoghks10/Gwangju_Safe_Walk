@@ -2,28 +2,13 @@ package com.exception.gwangju_safe_walk;
 
 import java.util.Calendar;
 
-/**
- * 일출·일몰 시각 계산 (Almanac for Computers 표준 알고리즘).
- * 네트워크나 외부 라이브러리 없이 날짜와 좌표만으로 계산한다.
- *
- * 광주 기준 검증값
- *   10/10  일출 06:34  일몰 18:05
- *   12/21  일출 07:36  일몰 17:24
- *   06/21  일출 05:18  일몰 19:50
- */
 public final class SunTime {
-
     private SunTime() {}
 
-    /** 공식 일출·일몰 천정각 (대기 굴절과 태양 반지름 보정 포함) */
     private static final double ZENITH = 90.833;
 
-    /** 한국 표준시 */
     private static final double TZ = 9.0;
 
-    /**
-     * @return 하루 중 시각(0~24). 극야·백야면 -1
-     */
     public static double calc(int year, int month, int day,
                               double lat, double lon, boolean rising) {
         Calendar c = Calendar.getInstance();
@@ -40,7 +25,7 @@ public final class SunTime {
         l = norm(l, 360);
 
         double ra = norm(Math.toDegrees(Math.atan(0.91764 * Math.tan(Math.toRadians(l)))), 360);
-        // 적경을 황경과 같은 사분면으로 맞춘다
+
         double lQuad = Math.floor(l / 90) * 90;
         double raQuad = Math.floor(ra / 90) * 90;
         ra = (ra + (lQuad - raQuad)) / 15.0;
@@ -51,7 +36,7 @@ public final class SunTime {
         double latR = Math.toRadians(lat);
         double cosH = (Math.cos(Math.toRadians(ZENITH)) - sinDec * Math.sin(latR))
                 / (cosDec * Math.cos(latR));
-        if (cosH > 1 || cosH < -1) return -1;   // 그 날 해가 뜨지 않거나 지지 않음
+        if (cosH > 1 || cosH < -1) return -1;
 
         double h = rising
                 ? (360 - Math.toDegrees(Math.acos(cosH)))
@@ -63,7 +48,6 @@ public final class SunTime {
         return norm(ut + TZ, 24);
     }
 
-    /** 지금이 밤인지 (일몰 후 ~ 일출 전) */
     public static boolean isNight(double lat, double lon) {
         Calendar c = Calendar.getInstance();
         double rise = calc(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1,
@@ -76,7 +60,6 @@ public final class SunTime {
         return now < rise || now >= set;
     }
 
-    /** "18:05" 형태로 */
     public static String format(double hours) {
         if (hours < 0) return "--:--";
         int h = (int) hours;
@@ -85,7 +68,6 @@ public final class SunTime {
         return String.format("%02d:%02d", h, m);
     }
 
-    /** 오늘 일몰 시각 문자열 */
     public static String sunsetText(double lat, double lon) {
         Calendar c = Calendar.getInstance();
         return format(calc(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1,

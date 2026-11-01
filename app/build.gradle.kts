@@ -33,6 +33,8 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation(libs.material)
     implementation("com.naver.maps:map-sdk:3.22.0")
+    // 네이버 지도의 FusedLocationSource 가 내부에서 쓰는 위치 라이브러리
+    implementation("com.google.android.gms:play-services-location:21.3.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)
     androidTestImplementation(libs.ext.junit)

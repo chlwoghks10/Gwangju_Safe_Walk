@@ -23,4 +23,18 @@
 
     <color name="icon_tint">#4A556E</color>
     <color name="scrim">#CCFFFFFF</color>
+
+    <!-- 하단 탭바 -->
+    <color name="tab_on">#2E5CE6</color>
+    <color name="tab_off">#8992A8</color>
+    <color name="tab_bg">#FFFFFF</color>
+    <color name="tab_line">#E6EAF2</color>
+
+    <!-- 오월길(5·18) -->
+    <color name="may">#C0392B</color>
+    <color name="may_soft">#FBECEA</color>
+
+    <!-- 지도 위에 떠 있는 둥근 버튼 -->
+    <color name="float_bg">#FFFFFF</color>
+    <color name="float_icon">#3B4559</color>
 </resources>

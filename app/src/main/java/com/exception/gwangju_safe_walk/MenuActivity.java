@@ -1,9 +1,11 @@
 package com.exception.gwangju_safe_walk;
 
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -17,8 +19,12 @@ import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.Locale;
 
 public class MenuActivity extends AppCompatActivity {
+    private static final String PREF = "safewalk";
+    private static final String KEY_SERVER = "server";
+    private static final String DEFAULT_SERVER = "13.209.99.73:8000";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -27,18 +33,16 @@ public class MenuActivity extends AppCompatActivity {
 
         Ui.systemBars(this);
 
-        findViewById(R.id.menuRoute).setOnClickListener(v -> go(RouteActivity.class));
-        findViewById(R.id.fabRoute).setOnClickListener(v -> go(RouteActivity.class));
-        findViewById(R.id.menuMap).setOnClickListener(v -> openMap(null));
-
-        // 시설 행을 누르면 해당 레이어만 켠 지도로 이동
         findViewById(R.id.rowCctv).setOnClickListener(v -> openMap("CCTV"));
         findViewById(R.id.rowLight).setOnClickListener(v -> openMap("보안등"));
         findViewById(R.id.rowBell).setOnClickListener(v -> openMap("비상벨"));
         findViewById(R.id.rowPolice).setOnClickListener(v -> openMap("경찰서"));
 
-        findViewById(R.id.tabHome).setOnClickListener(v -> finish());
-        findViewById(R.id.tabMap).setOnClickListener(v -> openMap(null));   // 새 탭
+        findViewById(R.id.rowServer).setOnClickListener(v -> askServer());
+        findViewById(R.id.rowTheme).setOnClickListener(v -> dialog("화면 색",
+                "해가 지면 어두운 색으로, 해가 뜨면 밝은 색으로 저절로 바뀝니다.\n\n"
+                        + "날짜와 광주의 위경도로 그날의 일출·일몰 시각을 계산해서 정하므로, "
+                        + "인터넷에 연결되어 있지 않아도 동작합니다."));
 
         findViewById(R.id.rowPrinciple).setOnClickListener(v -> dialog("설계 원칙",
                 "이 앱은 안전을 판정하지 않습니다.\n\n"
@@ -52,25 +56,70 @@ public class MenuActivity extends AppCompatActivity {
                         + "· 전국보안등정보표준데이터\n"
                         + "· 전국안전비상벨위치표준데이터\n"
                         + "· 경찰관서 위치 정보\n"
-                        + "· 보행 도로망 — OpenStreetMap\n\n"
-                        + "모두 공공데이터포털에서 개방된 자료이며, "
+                        + "· 보행 도로망 — OpenStreetMap\n"
+                        + "· 장소 검색 — 카카오 로컬\n"
+                        + "· 보행자 경로 — Tmap\n\n"
+                        + "공공데이터는 모두 공공데이터포털에서 개방된 자료이며, "
                         + "좌표 결측과 중복 지점을 정제하여 사용합니다."));
 
         findViewById(R.id.rowTeam).setOnClickListener(v -> dialog("만든 사람",
                 "익셉션 (Exception)\n조선대학교 정보통신공학과\n\n"
                         + "20233267 윤신혁\n20213148 최재환\n20233202 윤해준"));
 
-        findViewById(R.id.btnMenuSettings).setOnClickListener(v ->
-                Toast.makeText(this, "준비 중인 기능입니다", Toast.LENGTH_SHORT).show());
-
         countFacilities();
+        Tabs.attach(this, Tabs.MORE);
     }
 
-    private void go(Class<?> c) {
-        startActivity(new Intent(this, c));
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Tabs.attach(this, Tabs.MORE);
+        showServer();
+        showTheme();
     }
 
-    /** 특정 레이어만 켠 상태로 지도를 연다. null 이면 전체 표시 */
+    private void showServer() {
+        TextView t = findViewById(R.id.valServer);
+        if (t != null) t.setText(serverAddress());
+    }
+
+    private void showTheme() {
+        TextView t = findViewById(R.id.valTheme);
+        if (t == null) return;
+        boolean night = SunTime.isNight(MainActivity.CHOSUN.latitude, MainActivity.CHOSUN.longitude);
+        t.setText(night ? "자동 · 지금은 밤" : "자동 · 지금은 낮");
+    }
+
+    private String serverAddress() {
+        return getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                .getString(KEY_SERVER, DEFAULT_SERVER);
+    }
+
+    // 서버를 다시 시작하면 주소가 바뀌어서 직접 고칠 수 있어야 한다
+    private void askServer() {
+        final EditText input = new EditText(this);
+        input.setText(serverAddress());
+        input.setHint("예: 13.209.99.73:8000");
+
+        new AlertDialog.Builder(this)
+                .setTitle("서버 주소")
+                .setMessage("경로 계산을 맡는 서버의 주소입니다.\n"
+                        + "서버를 다시 시작하면 주소가 바뀔 수 있습니다.")
+                .setView(input)
+                .setPositiveButton("저장", (d, w) -> {
+                    String v = input.getText().toString().trim()
+                            .replace("http://", "").replace("https://", "");
+                    if (v.isEmpty()) return;
+                    if (!v.contains(":")) v = v + ":8000";
+                    getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                            .edit().putString(KEY_SERVER, v).apply();
+                    showServer();
+                    Toast.makeText(this, "저장되었습니다", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
     private void openMap(String only) {
         Intent i = new Intent(this, MapActivity.class);
         if (only != null) i.putExtra("only", only);
@@ -85,7 +134,6 @@ public class MenuActivity extends AppCompatActivity {
                 .show();
     }
 
-    /** assets 파일을 읽어 지점 수를 세어 표시 */
     private void countFacilities() {
         new Thread(() -> {
             final int cctv   = count("cctv.geojson");
@@ -104,33 +152,30 @@ public class MenuActivity extends AppCompatActivity {
 
     private void set(int id, int n) {
         TextView t = findViewById(id);
-        if (t != null) t.setText(n > 0 ? String.format("%,d곳", n) : "없음");
+        if (t != null) t.setText(n > 0 ? String.format(Locale.KOREA, "%,d곳", n) : "없음");
     }
 
     private int count(String file) {
-        try {
-            if (file.endsWith(".geojson") || file.endsWith(".json")) {
-                JSONObject root = new JSONObject(readAll(getAssets().open(file)));
-                JSONArray f = root.optJSONArray("features");
-                return f == null ? 0 : f.length();
+        try (InputStream in = getAssets().open(file)) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            String body = out.toString("UTF-8");
+
+            if (file.endsWith(".geojson")) {
+                JSONArray arr = new JSONObject(body).optJSONArray("features");
+                return arr == null ? 0 : arr.length();
             }
-            int n = 0;
-            try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(getAssets().open(file)))) {
-                while (r.readLine() != null) n++;
+            int lines = 0;
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(
+                    getAssets().open(file), "UTF-8"))) {
+                while (r.readLine() != null) lines++;
             }
-            return n;
+            return Math.max(0, lines - 1);
+
         } catch (Exception e) {
             return 0;
         }
-    }
-
-    private String readAll(InputStream in) throws Exception {
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
-        in.close();
-        return bos.toString("UTF-8");
     }
 }

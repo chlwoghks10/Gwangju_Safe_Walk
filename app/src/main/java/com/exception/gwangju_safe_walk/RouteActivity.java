@@ -1,14 +1,20 @@
 package com.exception.gwangju_safe_walk;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.location.Location;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,9 +26,11 @@ import androidx.fragment.app.FragmentManager;
 import com.naver.maps.geometry.LatLng;
 import com.naver.maps.geometry.LatLngBounds;
 import com.naver.maps.map.CameraUpdate;
+import com.naver.maps.map.LocationTrackingMode;
 import com.naver.maps.map.MapFragment;
 import com.naver.maps.map.NaverMap;
 import com.naver.maps.map.OnMapReadyCallback;
+import com.naver.maps.map.util.FusedLocationSource;
 import com.naver.maps.map.overlay.Marker;
 import com.naver.maps.map.overlay.PathOverlay;
 
@@ -34,50 +42,84 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * 경로 비교 화면.
- * 지도에서 출발지와 도착지를 탭하면 서버가 세 경로를 돌려준다.
- *   최단   거리만 보고 찾은 길
- *   안심 A 윤해준 모델 (구간별 안전 비용)
- *   안심 B 윤신혁 모델 (안전 부족도, 최단의 1.35배 이내)
- */
 public class RouteActivity extends AppCompatActivity implements OnMapReadyCallback {
-
     private static final String TAG = "SafeWalkRoute";
 
     private static final String PREF = "safewalk";
     private static final String KEY_SERVER = "server";
     private static final String DEFAULT_SERVER = "13.209.99.73:8000";
 
-    private static final int COLOR_SHORT = Color.rgb(31, 111, 235);    // 파랑
-    private static final int COLOR_SAFE  = Color.rgb(46, 140, 96);     // 초록
-    private static final int COLOR_SAFE2 = Color.rgb(124, 92, 224);    // 보라
+    public static final String EXTRA_DEST_NAME = "dest_name";
+    public static final String EXTRA_DEST_LAT  = "dest_lat";
+    public static final String EXTRA_DEST_LON  = "dest_lon";
+
+    private static final int COLOR_SHORT = Color.rgb(31, 111, 235);
+    private static final int COLOR_SAFE  = Color.rgb(46, 140, 96);
+    private static final int COLOR_SAFE2 = Color.rgb(124, 92, 224);
+
+    private static final double WALK_M_PER_MIN = 67.0;
 
     private NaverMap naverMap;
     private EditText editStart, editEnd;
-    private TextView txtShort, txtSafe, txtSafe2, btnSearch;
     private View compareBox;
+    private TextView btnSearch;
+
+    private View routeTabs;
+    private LinearLayout tabBox;
+
+    private View routeColorBar;
+    private TextView txtRouteName, txtRouteTime, txtRouteMeta, txtRouteArrive;
+    private LinearLayout facBox;
+    private TextView btnGuide, btnVoiceTest, btnMute;
 
     private LatLng startPoint, endPoint;
     private Marker startMarker, endMarker;
-    private PathOverlay pathShort, pathSafe, pathSafe2;
     private final List<Marker> facilityMarkers = new ArrayList<>();
 
-    /** 시설 종류별 색과 표시 크기 */
     private static final String[] FAC_KEYS   = {"light", "cctv", "bell", "police"};
+    private static final String[] FAC_NAMES  = {"보안등", "CCTV", "비상벨", "경찰서"};
     private static final int[]    FAC_COLORS = {
-            Color.rgb(232, 161,  58),   // 보안등
-            Color.rgb( 31, 111, 235),   // CCTV
-            Color.rgb(214,  69,  69),   // 비상벨
-            Color.rgb( 46, 140,  96)};  // 경찰서
+            Color.rgb(232, 161,  58),
+            Color.rgb( 31, 111, 235),
+            Color.rgb(214,  69,  69),
+            Color.rgb( 46, 140,  96)};
     private static final int[]    FAC_SIZES  = {16, 26, 28, 30};
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
+
+    private static final int REQ_LOCATION = 1000;
+    private FusedLocationSource locationSource;
+
+    private static final int WANT_NONE = 0, WANT_START = 1, WANT_END = 2;
+    private int wantMyLocation = WANT_NONE;
+
+    private Voice voice;
+
+    private static class RouteInfo {
+        String name;
+        int color;
+        JSONObject json;
+        List<LatLng> pts;
+        double lengthM;
+        double extraM;
+        int[] fac = new int[4];
+        boolean sameAsShortest;
+        PathOverlay overlay;
+
+        int minutes() {
+            return Math.max(1, (int) Math.round(lengthM / WALK_M_PER_MIN));
+        }
+    }
+
+    private final List<RouteInfo> routes = new ArrayList<>();
+    private int selected = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,22 +130,51 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
         editStart  = findViewById(R.id.editStart);
         editEnd    = findViewById(R.id.editEnd);
-        txtShort   = findViewById(R.id.txtShort);
-        txtSafe    = findViewById(R.id.txtSafe);
-        txtSafe2   = findViewById(R.id.txtSafe2);
         compareBox = findViewById(R.id.compareBox);
         btnSearch  = findViewById(R.id.btnSearch);
 
+        routeTabs  = findViewById(R.id.routeTabs);
+        tabBox     = findViewById(R.id.tabBox);
+
+        routeColorBar  = findViewById(R.id.routeColorBar);
+        txtRouteName   = findViewById(R.id.txtRouteName);
+        txtRouteTime   = findViewById(R.id.txtRouteTime);
+        txtRouteMeta   = findViewById(R.id.txtRouteMeta);
+        txtRouteArrive = findViewById(R.id.txtRouteArrive);
+        facBox         = findViewById(R.id.facBox);
+        btnGuide       = findViewById(R.id.btnGuide);
+        btnVoiceTest   = findViewById(R.id.btnVoiceTest);
+        btnMute        = findViewById(R.id.btnMute);
+
         editStart.setFocusable(false);
         editEnd.setFocusable(false);
-        editStart.setHint("지도를 눌러 출발지를 정하세요");
-        editEnd.setHint("지도를 눌러 도착지를 정하세요");
+        editStart.setHint("눌러서 장소 검색 · 또는 지도를 탭");
+        editEnd.setHint("눌러서 장소 검색 · 또는 지도를 탭");
+
+        editStart.setOnClickListener(v -> openSearch(true));
+        editEnd.setOnClickListener(v -> openSearch(false));
 
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
         btnSearch.setOnClickListener(v -> requestRoute());
 
-        View serverBtn = findViewById(R.id.btnServer);
-        if (serverBtn != null) serverBtn.setOnClickListener(v -> askServer());
+        locationSource = new FusedLocationSource(this, REQ_LOCATION);
+
+        View locateBtn = findViewById(R.id.btnLocate);
+        if (locateBtn != null) locateBtn.setOnClickListener(v -> showMyLocationOnMap());
+
+        voice = new Voice(this, (ready, message) -> ui.post(() -> {
+            if (ready) return;
+            // ui.post 로 넘겼으므로 이 시점에는 voice 가 들어가 있다
+            if (voice == null || !voice.isMuted()) btnMute.setText("음성 불가");
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        }));
+
+        btnGuide.setOnClickListener(v -> startGuide());
+        btnVoiceTest.setOnClickListener(v -> voice.say("300미터 앞 좌회전입니다.", true));
+        btnMute.setOnClickListener(v -> {
+            boolean muted = voice.toggleMute();
+            btnMute.setText(muted ? "음성 꺼짐" : "음성 켜짐");
+        });
 
         FragmentManager fm = getSupportFragmentManager();
         MapFragment f = (MapFragment) fm.findFragmentById(R.id.routeMap);
@@ -112,16 +183,58 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             fm.beginTransaction().add(R.id.routeMap, f).commit();
         }
         f.getMapAsync(this);
+
+        Tabs.attach(this, Tabs.ROUTE);
+        takeDest(getIntent());
     }
 
-    /* ─────────── 서버 주소 ─────────── */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Tabs.attach(this, Tabs.ROUTE);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        takeDest(intent);
+    }
+
+    private LatLng pendingDest;
+    private String pendingDestName;
+
+    private void takeDest(Intent i) {
+        if (i == null) return;
+        String name = i.getStringExtra(EXTRA_DEST_NAME);
+        double lat = i.getDoubleExtra(EXTRA_DEST_LAT, 0);
+        double lon = i.getDoubleExtra(EXTRA_DEST_LON, 0);
+        if (name == null || (lat == 0 && lon == 0)) return;
+
+        i.removeExtra(EXTRA_DEST_NAME);
+
+        pendingDest = new LatLng(lat, lon);
+        pendingDestName = name;
+        if (naverMap != null) applyPendingDest();
+    }
+
+    private void applyPendingDest() {
+        if (pendingDest == null) return;
+        LatLng c = pendingDest;
+        String name = pendingDestName;
+        pendingDest = null;
+        pendingDestName = null;
+
+        setEnd(c, name);
+        naverMap.moveCamera(CameraUpdate.scrollAndZoomTo(c, 16));
+        Toast.makeText(this, "출발지를 정하면 경로를 비교할 수 있습니다", Toast.LENGTH_SHORT).show();
+    }
 
     private String serverAddress() {
         SharedPreferences p = getSharedPreferences(PREF, Context.MODE_PRIVATE);
         return p.getString(KEY_SERVER, DEFAULT_SERVER);
     }
 
-    /** EC2 를 껐다 켜면 주소가 바뀌므로 앱에서 직접 수정할 수 있게 한다 */
     private void askServer() {
         final EditText input = new EditText(this);
         input.setText(serverAddress());
@@ -144,57 +257,154 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                 .show();
     }
 
-    /* ─────────── 지도 ─────────── */
-
     @Override
     public void onMapReady(@NonNull NaverMap map) {
         naverMap = map;
         naverMap.setNightModeEnabled(SunTime.isNight(35.1400, 126.9270));
         naverMap.moveCamera(CameraUpdate.scrollAndZoomTo(MainActivity.CHOSUN, 15));
         naverMap.setOnMapClickListener((point, coord) -> onMapTapped(coord));
+
+        naverMap.setLocationSource(locationSource);
+        naverMap.addOnLocationChangeListener(this::onLocationChanged);
+        naverMap.getUiSettings().setZoomControlEnabled(false);
+
+        applyPendingDest();
     }
 
-    /** 첫 탭은 출발지, 두 번째는 도착지, 세 번째부터 다시 출발지 */
-    private void onMapTapped(LatLng c) {
-        if (startPoint == null || endPoint != null) {
-            clearRoutes();
-            endPoint = null;
-            startPoint = c;
+    private void showMyLocationOnMap() {
+        if (naverMap == null) return;
+        naverMap.setLocationTrackingMode(LocationTrackingMode.Follow);
+    }
 
-            if (endMarker != null) endMarker.setMap(null);
-            if (startMarker == null) startMarker = new Marker();
-            startMarker.setPosition(c);
-            startMarker.setCaptionText("출발");
-            startMarker.setMap(naverMap);
+    private void pickMyLocation(int target) {
+        if (naverMap == null) return;
+        wantMyLocation = target;
+        naverMap.setLocationTrackingMode(LocationTrackingMode.Follow);
+        Toast.makeText(this, "현재 위치를 찾고 있습니다…", Toast.LENGTH_SHORT).show();
+    }
 
-            editStart.setText(format(c));
-            editEnd.setText("");
-            compareBox.setVisibility(View.GONE);
-        } else {
-            endPoint = c;
-            if (endMarker == null) endMarker = new Marker();
-            endMarker.setPosition(c);
-            endMarker.setCaptionText("도착");
-            endMarker.setIconTintColor(Color.rgb(214, 69, 69));
-            endMarker.setMap(naverMap);
+    private void onLocationChanged(@NonNull Location loc) {
+        // 버튼을 누른 직후 한 번만 쓴다. 계속 덮어쓰면 출발지가 따라 움직인다
+        if (wantMyLocation == WANT_NONE) return;
+        int target = wantMyLocation;
+        wantMyLocation = WANT_NONE;
 
-            editEnd.setText(format(c));
+        LatLng c = new LatLng(loc.getLatitude(), loc.getLongitude());
+        if (target == WANT_START) setStart(c, "내 위치");
+        else                      setEnd(c, "내 위치");
+
+        naverMap.setLocationTrackingMode(LocationTrackingMode.NoFollow);
+        Toast.makeText(this,
+                target == WANT_START ? "현재 위치를 출발지로 정했습니다"
+                                     : "현재 위치를 도착지로 정했습니다",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        if (locationSource.onRequestPermissionsResult(requestCode, permissions, grantResults)) {
+            if (!locationSource.isActivated()) {
+                wantMyLocation = WANT_NONE;
+                if (naverMap != null) naverMap.setLocationTrackingMode(LocationTrackingMode.None);
+                Toast.makeText(this,
+                        "위치 권한이 없어 현재 위치를 쓸 수 없습니다. 지도를 눌러 출발지를 정하세요",
+                        Toast.LENGTH_LONG).show();
+            }
+            return;
         }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    private void onMapTapped(LatLng c) {
+        if (startPoint == null || endPoint != null) setStart(c);
+        else setEnd(c);
+    }
+
+    private void setStart(LatLng c) {
+        setStart(c, null);
+    }
+
+    private void setStart(LatLng c, String label) {
+        clearRoutes();
+        endPoint = null;
+        startPoint = c;
+
+        if (endMarker != null) endMarker.setMap(null);
+        if (startMarker == null) startMarker = new Marker();
+        startMarker.setPosition(c);
+        startMarker.setCaptionText("출발");
+        startMarker.setMap(naverMap);
+
+        editStart.setText(label != null ? label : format(c));
+        editEnd.setText("");
+        compareBox.setVisibility(View.GONE);
+    }
+
+    private void setEnd(LatLng c) {
+        setEnd(c, null);
+    }
+
+    private void setEnd(LatLng c, String label) {
+        endPoint = c;
+        if (endMarker == null) endMarker = new Marker();
+        endMarker.setPosition(c);
+        endMarker.setCaptionText("도착");
+        endMarker.setIconTintColor(Color.rgb(214, 69, 69));
+        endMarker.setMap(naverMap);
+
+        editEnd.setText(label != null ? label : format(c));
     }
 
     private String format(LatLng c) {
-        return String.format("%.5f, %.5f", c.latitude, c.longitude);
+        return String.format(Locale.KOREA, "%.5f, %.5f", c.latitude, c.longitude);
     }
 
     private void clearRoutes() {
-        if (pathShort != null) { pathShort.setMap(null); pathShort = null; }
-        if (pathSafe  != null) { pathSafe.setMap(null);  pathSafe  = null; }
-        if (pathSafe2 != null) { pathSafe2.setMap(null); pathSafe2 = null; }
+        for (RouteInfo r : routes) {
+            if (r.overlay != null) r.overlay.setMap(null);
+        }
+        routes.clear();
         for (Marker m : facilityMarkers) m.setMap(null);
         facilityMarkers.clear();
+
+        tabBox.removeAllViews();
+        routeTabs.setVisibility(View.GONE);
+        if (voice != null) voice.stop();
     }
 
-    /* ─────────── 서버 요청 ─────────── */
+    private static final int REQ_SEARCH_START = 2001;
+    private static final int REQ_SEARCH_END   = 2002;
+
+    private void openSearch(boolean forStart) {
+        Intent i = new Intent(this, SearchActivity.class);
+        i.putExtra(SearchActivity.EXTRA_FOR_START, forStart);
+        startActivityForResult(i, forStart ? REQ_SEARCH_START : REQ_SEARCH_END);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null) return;
+        if (requestCode != REQ_SEARCH_START && requestCode != REQ_SEARCH_END) return;
+
+        boolean toStart = (requestCode == REQ_SEARCH_START);
+
+        if (data.getBooleanExtra(SearchActivity.EXTRA_USE_MY_LOCATION, false)) {
+            pickMyLocation(toStart ? WANT_START : WANT_END);
+            return;
+        }
+
+        String name = data.getStringExtra(SearchActivity.EXTRA_NAME);
+        double lat  = data.getDoubleExtra(SearchActivity.EXTRA_LAT, 0);
+        double lon  = data.getDoubleExtra(SearchActivity.EXTRA_LON, 0);
+        if (lat == 0 && lon == 0) return;
+
+        LatLng c = new LatLng(lat, lon);
+        if (toStart) setStart(c, name);
+        else         setEnd(c, name);
+        if (naverMap != null) naverMap.moveCamera(CameraUpdate.scrollAndZoomTo(c, 16));
+    }
 
     private void requestRoute() {
         if (startPoint == null || endPoint == null) {
@@ -207,7 +417,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         btnSearch.setEnabled(false);
 
         io.execute(() -> {
-            String url = String.format(
+            String url = String.format(Locale.US,
                     "http://%s/route?start_lat=%f&start_lon=%f&end_lat=%f&end_lon=%f",
                     host, startPoint.latitude, startPoint.longitude,
                     endPoint.latitude, endPoint.longitude);
@@ -225,13 +435,25 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                 ui.post(() -> {
                     btnSearch.setText("경로 비교하기");
                     btnSearch.setEnabled(true);
-                    new AlertDialog.Builder(this)
-                            .setTitle("서버에 연결하지 못했습니다")
-                            .setMessage(msg + "\n\n현재 주소: " + host
-                                    + "\n\nEC2 를 다시 시작했다면 주소가 바뀌었을 수 있습니다.")
-                            .setPositiveButton("주소 변경", (d, w) -> askServer())
-                            .setNegativeButton("닫기", null)
-                            .show();
+
+                    // 서버가 한글로 이유를 돌려준 경우는 연결 실패가 아니라 거부다
+                    boolean refused = msg.contains("도로망") || msg.contains("가깝습니다")
+                            || msg.contains("이어지지");
+                    if (refused) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("경로를 만들 수 없습니다")
+                                .setMessage(msg + "\n\n현재 도로망은 조선대 주변 2km 입니다.")
+                                .setPositiveButton("닫기", null)
+                                .show();
+                    } else {
+                        new AlertDialog.Builder(this)
+                                .setTitle("서버에 연결하지 못했습니다")
+                                .setMessage(msg + "\n\n현재 주소: " + host
+                                        + "\n\nEC2 를 다시 시작했다면 주소가 바뀌었을 수 있습니다.")
+                                .setPositiveButton("주소 변경", (d, w) -> askServer())
+                                .setNegativeButton("닫기", null)
+                                .show();
+                    }
                 });
             }
         });
@@ -264,47 +486,44 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         }
     }
 
-    /* ─────────── 결과 표시 ─────────── */
-
     private void showResult(JSONObject json) {
         try {
             JSONObject sh = json.getJSONObject("shortest");
             JSONObject sa = json.getJSONObject("safest");
-            JSONObject sb = json.optJSONObject("safest2");       // 없으면 옛 서버
+            JSONObject sb = json.optJSONObject("safest2");
             boolean same  = json.optBoolean("same", false);
             boolean same2 = json.optBoolean("same2", false);
 
             clearRoutes();
 
-            List<LatLng> shc = coords(sh.getJSONArray("coords"));
-            List<LatLng> sac = coords(sa.getJSONArray("coords"));
-            List<LatLng> sbc = sb == null ? null : coords(sb.getJSONArray("coords"));
+            double shortestM = sh.getDouble("length_m");
 
-            // 굵은 것부터 깔아야 위의 선이 가려지지 않는다
-            pathShort = drawPath(shc, COLOR_SHORT, 15);
-            if (!same)  pathSafe  = drawPath(sac, COLOR_SAFE, 10);
-            if (sbc != null && !same2) pathSafe2 = drawPath(sbc, COLOR_SAFE2, 6);
+            routes.add(build("최단",   COLOR_SHORT, sh, shortestM, false));
+            routes.add(build("안심 A", COLOR_SAFE,  sa, shortestM, same));
+            if (sb != null) routes.add(build("안심 B", COLOR_SAFE2, sb, shortestM, same2));
 
-            drawFacilities(same ? sh : sa);
-
-            txtShort.setText(summary(sh, 0));
-            txtSafe.setText(same
-                    ? "최단 경로와 동일"
-                    : summary(sa, sa.getDouble("length_m") - sh.getDouble("length_m")));
-
-            if (sb == null) {
-                txtSafe2.setText("서버가 아직 이 경로를 보내지 않습니다");
-            } else if (same2) {
-                txtSafe2.setText("최단 경로와 동일");
-            } else {
-                txtSafe2.setText(summary(sb, sb.getDouble("length_m") - sh.getDouble("length_m")));
+            // 세 개를 모두 깔아 두고, 고른 것만 굵게 칠한다
+            for (int i = 0; i < routes.size(); i++) {
+                final int idx = i;
+                RouteInfo r = routes.get(i);
+                if (r.pts.size() < 2) continue;
+                PathOverlay p = new PathOverlay();
+                p.setCoords(r.pts);
+                p.setOutlineWidth(0);
+                p.setMap(naverMap);
+                p.setOnClickListener(o -> {
+                    select(idx);
+                    return true;
+                });
+                r.overlay = p;
             }
 
+            buildTabs();
+            select(0);
             compareBox.setVisibility(View.VISIBLE);
 
-            List<LatLng> all = new ArrayList<>(shc);
-            all.addAll(sac);
-            if (sbc != null) all.addAll(sbc);
+            List<LatLng> all = new ArrayList<>();
+            for (RouteInfo r : routes) all.addAll(r.pts);
             fitTo(all);
 
         } catch (Exception e) {
@@ -313,16 +532,149 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         }
     }
 
-    /** 한 줄 요약. extra 가 0 보다 크면 추가 거리를 괄호로 덧붙인다 */
-    private String summary(JSONObject r, double extra) throws Exception {
-        double m = r.getDouble("length_m");
-        String head = String.format("%,.0f m · 도보 %d분", m, Math.max(1, (int) Math.round(m / 67.0)));
-        if (extra > 0.5) head += String.format("  (+%,.0f m)", extra);
-        return head + String.format("\nCCTV %d대 · 보안등 %d개", r.getInt("cctv"), r.getInt("light"));
+    private RouteInfo build(String name, int color, JSONObject o,
+                            double shortestM, boolean same) throws Exception {
+        RouteInfo r = new RouteInfo();
+        r.name = name;
+        r.color = color;
+        r.json = o;
+        r.pts = coords(o.getJSONArray("coords"));
+        r.lengthM = o.getDouble("length_m");
+        r.extraM = r.lengthM - shortestM;
+        r.sameAsShortest = same;
+        for (int i = 0; i < FAC_KEYS.length; i++) r.fac[i] = o.optInt(FAC_KEYS[i], 0);
+        return r;
     }
 
-    /** 응답의 facilities 를 종류별 색으로 지도에 찍는다 */
+    private void buildTabs() {
+        tabBox.removeAllViews();
+        for (int i = 0; i < routes.size(); i++) {
+            final int idx = i;
+            RouteInfo r = routes.get(i);
+
+            TextView chip = new TextView(this);
+            chip.setText(r.name + "  " + r.minutes() + "분");
+            chip.setTextSize(13);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(16), dp(9), dp(16), dp(9));
+            chip.setClickable(true);
+            chip.setFocusable(true);
+            chip.setOnClickListener(v -> select(idx));
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (i > 0) lp.setMarginStart(dp(7));
+            chip.setLayoutParams(lp);
+
+            tabBox.addView(chip);
+        }
+        routeTabs.setVisibility(routes.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void select(int index) {
+        if (index < 0 || index >= routes.size()) return;
+        selected = index;
+
+        for (int i = 0; i < tabBox.getChildCount() && i < routes.size(); i++) {
+            TextView chip = (TextView) tabBox.getChildAt(i);
+            boolean on = (i == selected);
+            GradientDrawable g = new GradientDrawable();
+            g.setCornerRadius(dp(20));
+            if (on) {
+                g.setColor(routes.get(i).color);
+                chip.setTextColor(Color.WHITE);
+            } else {
+                g.setColor(Color.WHITE);
+                g.setStroke(dp(1), Color.rgb(230, 234, 242));
+                chip.setTextColor(Color.rgb(92, 104, 128));
+            }
+            chip.setBackground(g);
+        }
+
+        for (int i = 0; i < routes.size(); i++) {
+            RouteInfo r = routes.get(i);
+            if (r.overlay == null) continue;
+            boolean on = (i == selected);
+            r.overlay.setColor(on ? r.color : fade(r.color));
+            r.overlay.setWidth(dp(on ? 7 : 3));
+            r.overlay.setZIndex(on ? 100 : 0);
+        }
+
+        drawFacilities(routes.get(selected).json);
+        updateDetail();
+    }
+
+    private static int fade(int color) {
+        return Color.argb(80, Color.red(color), Color.green(color), Color.blue(color));
+    }
+
+    private void updateDetail() {
+        RouteInfo r = routes.get(selected);
+
+        routeColorBar.setBackgroundColor(r.color);
+        txtRouteName.setText(r.name);
+        txtRouteName.setTextColor(r.color);
+        txtRouteTime.setText(r.minutes() + "분");
+
+        StringBuilder meta = new StringBuilder();
+        meta.append(String.format(Locale.KOREA, "%,.0f m", r.lengthM));
+        if (r.sameAsShortest) {
+            meta.append(" · 최단 경로와 같은 길");
+        } else if (r.extraM > 0.5) {
+            meta.append(String.format(Locale.KOREA, " · 최단보다 %,.0f m 더 걸음", r.extraM));
+        } else if (r.extraM < -0.5) {
+            meta.append(String.format(Locale.KOREA, " · 최단보다 %,.0f m 짧음", -r.extraM));
+        }
+        txtRouteMeta.setText(meta.toString());
+
+        Calendar c = Calendar.getInstance();
+        c.add(Calendar.MINUTE, r.minutes());
+        int h = c.get(Calendar.HOUR_OF_DAY);
+        String ampm = h < 12 ? "오전" : "오후";
+        int h12 = h % 12 == 0 ? 12 : h % 12;
+        txtRouteArrive.setText(String.format(Locale.KOREA,
+                "지금 출발하면 %s %d:%02d 도착", ampm, h12, c.get(Calendar.MINUTE)));
+
+        facBox.removeAllViews();
+        for (int i = 0; i < FAC_KEYS.length; i++) {
+            TextView t = new TextView(this);
+            t.setText(FAC_NAMES[i] + " " + r.fac[i]);
+            t.setTextSize(12);
+            t.setTextColor(r.fac[i] > 0 ? FAC_COLORS[i] : Color.rgb(137, 146, 168));
+            t.setPadding(dp(11), dp(6), dp(11), dp(6));
+
+            GradientDrawable g = new GradientDrawable();
+            g.setCornerRadius(dp(14));
+            g.setColor(Color.WHITE);
+            g.setStroke(dp(1), r.fac[i] > 0 ? FAC_COLORS[i] : Color.rgb(230, 234, 242));
+            t.setBackground(g);
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (i > 0) lp.setMarginStart(dp(6));
+            t.setLayoutParams(lp);
+
+            facBox.addView(t);
+        }
+    }
+
+    private void startGuide() {
+        if (routes.isEmpty()) return;
+        RouteInfo r = routes.get(selected);
+
+        voice.say(r.name + " 경로로 안내를 시작합니다. 총 "
+                + Voice.distanceText(r.lengthM) + ", 도보 " + r.minutes() + "분입니다.", true);
+        voice.say("300미터 앞 좌회전입니다.");
+        voice.say("경로를 이탈했습니다. 경로를 다시 찾습니다.");
+
+        Toast.makeText(this, "소리가 나지 않으면 폰 볼륨(미디어)을 올려 보세요",
+                Toast.LENGTH_SHORT).show();
+    }
+
     private void drawFacilities(JSONObject route) {
+        for (Marker m : facilityMarkers) m.setMap(null);
+        facilityMarkers.clear();
+
         JSONObject fac = route.optJSONObject("facilities");
         if (fac == null) return;
 
@@ -355,27 +707,25 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         return out;
     }
 
-    private PathOverlay drawPath(List<LatLng> pts, int color, int width) {
-        if (pts.size() < 2) return null;
-        PathOverlay p = new PathOverlay();
-        p.setCoords(pts);
-        p.setColor(color);
-        p.setWidth(width);
-        p.setOutlineWidth(0);
-        p.setMap(naverMap);
-        return p;
-    }
-
     private void fitTo(List<LatLng> pts) {
-        if (pts.isEmpty()) return;
+        if (pts.isEmpty() || naverMap == null) return;
         LatLngBounds.Builder b = new LatLngBounds.Builder();
         for (LatLng p : pts) b.include(p);
-        naverMap.moveCamera(CameraUpdate.fitBounds(b.build(), 120, 120, 120, 880));
+
+        View sheet = findViewById(R.id.bottomSheet);
+        int bottom = (sheet != null && sheet.getHeight() > 0)
+                ? sheet.getHeight() + dp(24) : dp(300);
+        naverMap.moveCamera(CameraUpdate.fitBounds(b.build(), dp(40), dp(110), dp(40), bottom));
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     @Override
     protected void onDestroy() {
         io.shutdownNow();
+        if (voice != null) voice.shutdown();
         super.onDestroy();
     }
 }

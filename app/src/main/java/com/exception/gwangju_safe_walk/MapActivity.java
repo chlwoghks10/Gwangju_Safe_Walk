@@ -33,17 +33,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MapActivity extends AppCompatActivity implements OnMapReadyCallback {
-
     private static final String TAG = "SafeWalkMap";
 
-    /** 한 레이어가 이 수를 넘으면 그리지 않고 확대를 안내한다 (멈춤 방지) */
     private static final int SAFETY_CAP = 1200;
 
     private static class Layer {
         final String file, label;
         final int color, sizeSmall, sizeBig;
-        final double minZoom;                 // 이 줌 이상에서만 표시
-        final List<double[]> pts = new ArrayList<>();   // {lat, lon, count}
+        final double minZoom;
+        final List<double[]> pts = new ArrayList<>();
         boolean on = true;
         TextView chip;
 
@@ -71,9 +69,7 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
         Ui.systemBars(this);
 
         txtCount = findViewById(R.id.txtCount);
-        findViewById(R.id.btnBack).setOnClickListener(v -> finish());
 
-        // 지점이 많은 레이어일수록 더 확대해야 표시된다
         layers.add(new Layer("light.geojson",  "보안등", Color.rgb(232, 161,  58), 14, 20, 16));
         layers.add(new Layer("cctv.geojson",   "CCTV",   Color.rgb( 31, 111, 235), 22, 30, 15));
         layers.add(new Layer("bell.geojson",   "비상벨", Color.rgb(214,  69,  69), 24, 32, 11));
@@ -83,6 +79,8 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
 
         txtCount.setVisibility(View.VISIBLE);
         txtCount.setText("데이터 읽는 중…");
+
+        Tabs.attach(this, Tabs.MAP);
         loadInBackground();
 
         FragmentManager fm = getSupportFragmentManager();
@@ -95,7 +93,6 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
     }
 
     private void bindChips() {
-        // 홈이나 메뉴에서 특정 레이어를 지정해 들어온 경우 그것만 켠다
         String only = getIntent().getStringExtra("only");
 
         int[] ids = {R.id.chipLight, R.id.chipCctv, R.id.chipBell, R.id.chipPolice};
@@ -116,13 +113,17 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
         }
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Tabs.attach(this, Tabs.MAP);
+    }
+
     private void styleChip(Layer L) {
         if (L.chip == null) return;
         L.chip.setAlpha(L.on ? 1f : 0.4f);
         L.chip.setTextColor(L.on ? L.color : Color.rgb(138, 147, 172));
     }
-
-    /* ─────────── 데이터 읽기 ─────────── */
 
     private void loadInBackground() {
         new Thread(() -> {
@@ -159,7 +160,6 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
         }
     }
 
-    /** GeoJSON 좌표 순서는 [경도, 위도] 이므로 뒤집어 저장 */
     private void readGeoJson(Layer L) throws Exception {
         JSONObject root = new JSONObject(readAll(getAssets().open(L.file)));
         JSONArray feats = root.optJSONArray("features");
@@ -211,15 +211,12 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
         return bos.toString("UTF-8");
     }
 
-    /* ─────────── 지도 ─────────── */
-
     @Override
     public void onMapReady(@NonNull NaverMap map) {
         naverMap = map;
 
         naverMap.setNightModeEnabled(SunTime.isNight(35.1400, 126.9270));
 
-        // 특정 레이어로 들어왔다면 그 레이어가 보이는 줌에서 시작한다
         String only = getIntent().getStringExtra("only");
         double startZoom = 16;
         if (only != null) {
@@ -251,12 +248,6 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
         redraw();
     }
 
-    /**
-     * 표시 규칙
-     *  - 줌이 레이어 기준에 못 미치면 그 레이어는 그리지 않는다
-     *  - 그릴 때는 화면 안의 지점을 하나도 빠짐없이 그린다
-     *  → 같은 위치를 다시 봐도 항상 같은 마커가 같은 자리에 찍힌다
-     */
     private void redraw() {
         if (naverMap == null || !dataReady) return;
 
@@ -272,7 +263,7 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
         for (Layer L : layers) {
             if (!L.on) continue;
 
-            if (zoom < L.minZoom) {            // 아직 표시할 줌이 아님
+            if (zoom < L.minZoom) {
                 waiting.add(L.label);
                 continue;
             }
@@ -281,7 +272,7 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
             for (double[] p : L.pts) {
                 if (b.contains(new LatLng(p[0], p[1]))) vis.add(p);
             }
-            if (vis.size() > SAFETY_CAP) {     // 지나치게 많으면 보류
+            if (vis.size() > SAFETY_CAP) {
                 waiting.add(L.label);
                 continue;
             }
