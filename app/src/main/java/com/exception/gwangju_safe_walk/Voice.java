@@ -13,12 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * 길 안내 음성.
- *
- * 기본 엔진에 붙는 것이 실패하는 기기가 있어서, 폰에 깔린 엔진을 직접 찾아
- * 하나씩 지정해 붙어 본다. 그래도 안 되면 마지막으로 기본 방식을 한 번 더 시도한다.
- */
+// 길 안내 음성. 기본 엔진 연결이 실패하는 기기가 있어 폰에 깔린 엔진을 하나씩 지정해 붙어 본다
 public class Voice {
 
     private static final String TAG = "SafeWalkVoice";
@@ -45,6 +40,13 @@ public class Voice {
     private final List<String> waiting = new ArrayList<>();
     private int seq = 0;
 
+    private final TextToSpeech.OnInitListener initListener = new TextToSpeech.OnInitListener() {
+        @Override
+        public void onInit(int status) {
+            handleInit(status);
+        }
+    };
+
     public Voice(Context c, Listener listener) {
         this.listener = listener;
         this.appCtx = c.getApplicationContext();
@@ -55,7 +57,7 @@ public class Voice {
         tryNext();
     }
 
-    /** 이 앱이 볼 수 있는 TTS 엔진 목록. 매니페스트 queries 선언이 있어야 보인다 */
+    // 매니페스트 queries 선언이 있어야 엔진이 보인다
     private static List<String> visibleEngines(Context c) {
         List<String> out = new ArrayList<>();
         try {
@@ -72,7 +74,7 @@ public class Voice {
         return out;
     }
 
-    /** 엔진을 하나씩 지정해 붙어 보고, 다 실패하면 기본 방식으로 한 번 더 */
+    // 엔진을 하나씩 지정해 붙어 보고, 다 실패하면 기본 방식으로 한 번 더
     private void tryNext() {
         if (pending != null) {
             try { pending.shutdown(); } catch (Exception ignored) { }
@@ -91,23 +93,38 @@ public class Voice {
 
         try {
             TextToSpeech t = (pkg == null)
-                    ? new TextToSpeech(appCtx, this::onInit)
-                    : new TextToSpeech(appCtx, this::onInit, pkg);
+                    ? new TextToSpeech(appCtx, initListener)
+                    : new TextToSpeech(appCtx, initListener, pkg);
             // onInit 이 생성자 안에서 바로 불릴 수 있어, 그 경우 pending 을 덮지 않는다
             if (pending == null && !ready) pending = t;
         } catch (Exception e) {
             Log.e(TAG, "생성 실패 (" + lastTried + "): " + e.getMessage(), e);
-            main.post(this::tryNext);
+            main.post(new Runnable() {
+                @Override
+                public void run() {
+                    tryNext();
+                }
+            });
         }
     }
 
-    private void onInit(int status) {
+    private void handleInit(int status) {
         if (status != TextToSpeech.SUCCESS) {
             Log.w(TAG, "연결 실패 (" + lastTried + ") status=" + status);
-            main.post(this::tryNext);
+            main.post(new Runnable() {
+                @Override
+                public void run() {
+                    tryNext();
+                }
+            });
             return;
         }
-        main.post(this::finishInit);
+        main.post(new Runnable() {
+            @Override
+            public void run() {
+                finishInit();
+            }
+        });
     }
 
     private void finishInit() {

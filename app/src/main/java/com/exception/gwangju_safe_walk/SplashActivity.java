@@ -23,9 +23,12 @@ public class SplashActivity extends AppCompatActivity {
 
         Ui.systemBars(this, false);
 
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            startActivity(new Intent(SplashActivity.this, MainActivity.class));
-            finish();
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                startActivity(new Intent(SplashActivity.this, MainActivity.class));
+                finish();
+            }
         }, DELAY_MS);
     }
 }

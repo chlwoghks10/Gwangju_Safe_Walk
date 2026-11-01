@@ -1,5 +1,6 @@
 package com.exception.gwangju_safe_walk;
 
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -104,28 +105,38 @@ public class SavedActivity extends AppCompatActivity {
         go.setBackground(ContextCompat.getDrawable(this, R.drawable.bg_chip));
         card.addView(go);
 
-        View.OnClickListener open = v -> {
-            Intent i = new Intent(this, RouteActivity.class);
-            i.putExtra(RouteActivity.EXTRA_DEST_NAME, it.name);
-            i.putExtra(RouteActivity.EXTRA_DEST_LAT, it.lat);
-            i.putExtra(RouteActivity.EXTRA_DEST_LON, it.lon);
-            startActivity(i);
+        View.OnClickListener open = new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent i = new Intent(SavedActivity.this, RouteActivity.class);
+                i.putExtra(RouteActivity.EXTRA_DEST_NAME, it.name);
+                i.putExtra(RouteActivity.EXTRA_DEST_LAT, it.lat);
+                i.putExtra(RouteActivity.EXTRA_DEST_LON, it.lon);
+                startActivity(i);
+            }
         };
         card.setOnClickListener(open);
         go.setOnClickListener(open);
 
-        card.setOnLongClickListener(v -> {
-            new AlertDialog.Builder(this)
-                    .setTitle("저장 해제")
-                    .setMessage(it.name + " 을(를) 목록에서 지울까요?")
-                    .setPositiveButton("지우기", (d, w) -> {
-                        Saved.remove(this, it.name);
-                        build();
-                        Toast.makeText(this, "지웠습니다", Toast.LENGTH_SHORT).show();
-                    })
-                    .setNegativeButton("취소", null)
-                    .show();
-            return true;
+        card.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                new AlertDialog.Builder(SavedActivity.this)
+                        .setTitle("저장 해제")
+                        .setMessage(it.name + " 을(를) 목록에서 지울까요?")
+                        .setPositiveButton("지우기", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                Saved.remove(SavedActivity.this, it.name);
+                                build();
+                                Toast.makeText(SavedActivity.this, "지웠습니다",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        })
+                        .setNegativeButton("취소", null)
+                        .show();
+                return true;
+            }
         });
 
         return card;

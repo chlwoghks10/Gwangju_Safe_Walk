@@ -76,9 +76,24 @@ public class MayActivity extends AppCompatActivity implements OnMapReadyCallback
         btnPickedRoute = findViewById(R.id.btnPickedRoute);
         btnPickedStar  = findViewById(R.id.btnPickedStar);
 
-        findViewById(R.id.btnBack).setOnClickListener(v -> finish());
-        btnPickedRoute.setOnClickListener(v -> goRoute());
-        btnPickedStar.setOnClickListener(v -> toggleStar());
+        findViewById(R.id.btnBack).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                finish();
+            }
+        });
+        btnPickedRoute.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                goRoute();
+            }
+        });
+        btnPickedStar.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleStar();
+            }
+        });
 
         TextView sub = findViewById(R.id.maySub);
         sub.setText("광주 5·18 사적지 " + Place518.count() + "곳");
@@ -123,7 +138,12 @@ public class MayActivity extends AppCompatActivity implements OnMapReadyCallback
             row.setClickable(true);
             row.setFocusable(true);
             row.setBackground(ContextCompat.getDrawable(this, R.drawable.bg_row_ripple));
-            row.setOnClickListener(v -> pick(s));
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    pick(s);
+                }
+            });
 
             TextView no = new TextView(this);
             no.setText(String.valueOf(i + 1));
@@ -185,35 +205,46 @@ public class MayActivity extends AppCompatActivity implements OnMapReadyCallback
     // 사적지 좌표는 적어 두지 않고 장소 검색으로 받아 쓴다
     private void lookUp(final String name) {
         final String host = serverAddress();
-        io.execute(() -> {
-            try {
-                String url = "http://" + host + "/search?q=" + URLEncoder.encode(name, "UTF-8");
-                JSONArray arr = new JSONObject(httpGet(url)).getJSONArray("places");
-                if (arr.length() == 0) throw new Exception("검색 결과 없음");
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String url = "http://" + host + "/search?q="
+                            + URLEncoder.encode(name, "UTF-8");
+                    JSONArray arr = new JSONObject(httpGet(url)).getJSONArray("places");
+                    if (arr.length() == 0) throw new Exception("검색 결과 없음");
 
-                JSONObject best = arr.getJSONObject(0);
-                final double lat = best.optDouble("lat", 0), lon = best.optDouble("lon", 0);
-                final boolean inRange = best.optBoolean("in_range", false);
+                    JSONObject best = arr.getJSONObject(0);
+                    final double lat = best.optDouble("lat", 0);
+                    final double lon = best.optDouble("lon", 0);
+                    final boolean inRange = best.optBoolean("in_range", false);
 
-                ui.post(() -> {
-                    // 그 사이 다른 사적지를 골랐으면 버린다
-                    if (!name.equals(curName)) return;
-                    curLat = lat; curLon = lon; curInRange = inRange;
-                    dropPin(name, lat, lon);
-                    pickedRange.setText(inRange
-                            ? "도로망 안에 있어 경로를 만들 수 있습니다"
-                            : "도로망(조선대 주변 2km) 밖이라 경로는 아직 만들 수 없습니다");
-                    btnPickedRoute.setEnabled(inRange);
-                    btnPickedRoute.setAlpha(inRange ? 1f : 0.4f);
-                    paintStar();
-                });
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            // 그 사이 다른 사적지를 골랐으면 버린다
+                            if (!name.equals(curName)) return;
+                            curLat = lat; curLon = lon; curInRange = inRange;
+                            dropPin(name, lat, lon);
+                            pickedRange.setText(inRange
+                                    ? "도로망 안에 있어 경로를 만들 수 있습니다"
+                                    : "도로망(조선대 주변 2km) 밖이라 경로는 아직 만들 수 없습니다");
+                            btnPickedRoute.setEnabled(inRange);
+                            btnPickedRoute.setAlpha(inRange ? 1f : 0.4f);
+                            paintStar();
+                        }
+                    });
 
-            } catch (Exception e) {
-                Log.e(TAG, "장소 찾기 실패: " + e.getMessage(), e);
-                ui.post(() -> {
-                    if (!name.equals(curName)) return;
-                    pickedRange.setText("위치를 찾지 못했습니다. 서버 연결을 확인하세요");
-                });
+                } catch (Exception e) {
+                    Log.e(TAG, "장소 찾기 실패: " + e.getMessage(), e);
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!name.equals(curName)) return;
+                            pickedRange.setText("위치를 찾지 못했습니다. 서버 연결을 확인하세요");
+                        }
+                    });
+                }
             }
         });
     }

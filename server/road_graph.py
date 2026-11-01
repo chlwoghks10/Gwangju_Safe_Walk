@@ -24,7 +24,7 @@ class RouteResult:
 
 class RoadGraph:
     def __init__(self, nodes_csv: str, edges_csv: str):
-        # ── 노드 ──
+        # 노드
         id_to_index = {}
         self.lat: List[float] = []
         self.lon: List[float] = []
@@ -37,7 +37,7 @@ class RoadGraph:
 
         self.node_count = len(self.lat)
 
-        # ── 간선 ──
+        # 간선
         self.frm: List[int] = []
         self.to: List[int] = []
         self.length: List[float] = []
@@ -62,12 +62,12 @@ class RoadGraph:
 
         self.arc_count = len(self.frm)
 
-        # ── 인접 리스트 ──
+        # 인접 리스트
         self.adj: List[List[int]] = [[] for _ in range(self.node_count)]
         for a in range(self.arc_count):
             self.adj[self.frm[a]].append(a)
 
-    # ───────────────────────── 보조 ─────────────────────────
+    # 보조
 
     @staticmethod
     def _parse_geom(s: Optional[str]):
@@ -103,7 +103,7 @@ class RoadGraph:
     def distance_to_node(self, node: int, la: float, lo: float) -> float:
         return self.distance_meters(la, lo, self.lat[node], self.lon[node])
 
-    # ───────────────────────── 탐색 ─────────────────────────
+    # 탐색
 
     def shortest_path(self, src: int, dst: int, weight: List[float]) -> Optional[RouteResult]:
         """다익스트라. weight 는 간선 id 별 비용(모두 0 이상)."""
@@ -146,7 +146,7 @@ class RoadGraph:
             light=sum(self.light[a] for a in arcs),
         )
 
-    # ───────────────────────── 좌표 변환 ─────────────────────────
+    # 좌표 변환
 
     def coords_of(self, arcs: List[int]) -> List[List[float]]:
         """간선 경로를 지도에 그릴 [lat, lon] 목록으로. 연속 중복점 제거."""

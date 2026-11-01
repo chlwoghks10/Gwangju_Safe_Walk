@@ -66,11 +66,11 @@
             android:exported="false"
             android:launchMode="singleTop" />
 
-        <!-- 장소명 검색. 열리면 키보드가 바로 올라오게 한다 -->
         <activity
             android:name=".MayActivity"
             android:exported="false" />
 
+        <!-- 장소명 검색. 열리면 키보드가 바로 올라오게 한다 -->
         <activity
             android:name=".SearchActivity"
             android:exported="false"

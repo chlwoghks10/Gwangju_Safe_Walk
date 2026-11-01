@@ -86,13 +86,21 @@ public class SearchActivity extends AppCompatActivity {
 
         txtStatus = findViewById(R.id.txtStatus);
         listBox   = findViewById(R.id.listBox);
-        findViewById(R.id.btnBack).setOnClickListener(v -> finish());
+        findViewById(R.id.btnBack).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                finish();
+            }
+        });
 
-        findViewById(R.id.btnMyLocation).setOnClickListener(v -> {
-            Intent out = new Intent();
-            out.putExtra(EXTRA_USE_MY_LOCATION, true);
-            setResult(RESULT_OK, out);
-            finish();
+        findViewById(R.id.btnMyLocation).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent out = new Intent();
+                out.putExtra(EXTRA_USE_MY_LOCATION, true);
+                setResult(RESULT_OK, out);
+                finish();
+            }
         });
 
         android.widget.EditText editQuery = findViewById(R.id.editQuery);
@@ -110,7 +118,7 @@ public class SearchActivity extends AppCompatActivity {
         showRecent();
     }
 
-    private void onQueryChanged(String q) {
+    private void onQueryChanged(final String q) {
         if (pending != null) ui.removeCallbacks(pending);
 
         if (q.length() < 2) {
@@ -118,44 +126,60 @@ public class SearchActivity extends AppCompatActivity {
             return;
         }
         txtStatus.setText("검색 중…");
-        pending = () -> runSearch(q);
+        pending = new Runnable() {
+            @Override
+            public void run() {
+                runSearch(q);
+            }
+        };
         ui.postDelayed(pending, DEBOUNCE_MS);
     }
 
-    private void runSearch(String q) {
+    private void runSearch(final String q) {
         final int seq = ++requestSeq;
         final String host = serverAddress();
 
-        io.execute(() -> {
-            try {
-                // 한글을 그대로 붙이면 서버가 400 으로 거부한다
-                String url = "http://" + host + "/search?q=" + URLEncoder.encode(q, "UTF-8");
-                JSONArray arr = new JSONObject(httpGet(url)).getJSONArray("places");
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // 한글을 그대로 붙이면 서버가 400 으로 거부한다
+                    String url = "http://" + host + "/search?q="
+                            + URLEncoder.encode(q, "UTF-8");
+                    JSONArray arr = new JSONObject(httpGet(url)).getJSONArray("places");
 
-                final List<Place> found = new ArrayList<>();
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject o = arr.getJSONObject(i);
-                    found.add(new Place(
-                            o.optString("name", ""),
-                            o.optString("address", ""),
-                            o.optDouble("lat", 0),
-                            o.optDouble("lon", 0),
-                            o.optBoolean("in_range", false)));
+                    final List<Place> found = new ArrayList<>();
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject o = arr.getJSONObject(i);
+                        found.add(new Place(
+                                o.optString("name", ""),
+                                o.optString("address", ""),
+                                o.optDouble("lat", 0),
+                                o.optDouble("lon", 0),
+                                o.optBoolean("in_range", false)));
+                    }
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            // 더 최신 요청이 있으면 이 응답은 버린다
+                            if (seq != requestSeq) return;
+                            showPlaces(q, found);
+                        }
+                    });
+
+                } catch (Exception e) {
+                    Log.e(TAG, "검색 실패: " + e.getMessage(), e);
+                    final String msg =
+                            e.getMessage() == null ? "알 수 없는 오류" : e.getMessage();
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (seq != requestSeq) return;
+                            listBox.removeAllViews();
+                            txtStatus.setText("검색하지 못했습니다 — " + msg);
+                        }
+                    });
                 }
-                ui.post(() -> {
-                    // 더 최신 요청이 있으면 이 응답은 버린다
-                    if (seq != requestSeq) return;
-                    showPlaces(q, found);
-                });
-
-            } catch (Exception e) {
-                Log.e(TAG, "검색 실패: " + e.getMessage(), e);
-                final String msg = e.getMessage() == null ? "알 수 없는 오류" : e.getMessage();
-                ui.post(() -> {
-                    if (seq != requestSeq) return;
-                    listBox.removeAllViews();
-                    txtStatus.setText("검색하지 못했습니다 — " + msg);
-                });
             }
         });
     }
@@ -181,7 +205,7 @@ public class SearchActivity extends AppCompatActivity {
         for (Place p : sorted) addRow(q, p);
     }
 
-    private void addRow(String q, Place p) {
+    private void addRow(final String q, final Place p) {
         View row = inflater.inflate(R.layout.item_place, listBox, false);
         ((TextView) row.findViewById(R.id.txtName)).setText(p.name);
         ((TextView) row.findViewById(R.id.txtAddr)).setText(p.address);
@@ -194,30 +218,37 @@ public class SearchActivity extends AppCompatActivity {
             row.setAlpha(0.45f);
         }
 
-        ImageView star = row.findViewById(R.id.btnStar);
+        final ImageView star = row.findViewById(R.id.btnStar);
         star.setVisibility(View.VISIBLE);
         paintStar(star, Saved.has(this, p.name));
-        star.setOnClickListener(v -> {
-            boolean on = Saved.toggle(this, p.name, p.lat, p.lon);
-            paintStar(star, on);
-            Toast.makeText(this, on ? "저장했습니다" : "저장을 해제했습니다",
-                    Toast.LENGTH_SHORT).show();
+        star.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean on = Saved.toggle(SearchActivity.this, p.name, p.lat, p.lon);
+                paintStar(star, on);
+                Toast.makeText(SearchActivity.this,
+                        on ? "저장했습니다" : "저장을 해제했습니다",
+                        Toast.LENGTH_SHORT).show();
+            }
         });
 
-        row.setOnClickListener(v -> {
-            if (!p.inRange) {
-                Toast.makeText(this,
-                        "도로망 범위 밖이라 경로를 만들 수 없습니다 (현재 조선대 주변 2km)",
-                        Toast.LENGTH_LONG).show();
-                return;
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!p.inRange) {
+                    Toast.makeText(SearchActivity.this,
+                            "도로망 범위 밖이라 경로를 만들 수 없습니다 (현재 조선대 주변 2km)",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                addRecent(q);
+                Intent out = new Intent();
+                out.putExtra(EXTRA_NAME, p.name);
+                out.putExtra(EXTRA_LAT, p.lat);
+                out.putExtra(EXTRA_LON, p.lon);
+                setResult(RESULT_OK, out);
+                finish();
             }
-            addRecent(q);
-            Intent out = new Intent();
-            out.putExtra(EXTRA_NAME, p.name);
-            out.putExtra(EXTRA_LAT, p.lat);
-            out.putExtra(EXTRA_LON, p.lon);
-            setResult(RESULT_OK, out);
-            finish();
         });
 
         listBox.addView(row);
@@ -232,16 +263,19 @@ public class SearchActivity extends AppCompatActivity {
         }
         txtStatus.setText("최근 검색");
 
-        for (String word : recent) {
+        for (final String word : recent) {
             View row = inflater.inflate(R.layout.item_place, listBox, false);
             ((TextView) row.findViewById(R.id.txtName)).setText(word);
             ((TextView) row.findViewById(R.id.txtAddr)).setText("다시 검색");
             row.findViewById(R.id.txtFlag).setVisibility(View.GONE);
             row.findViewById(R.id.btnStar).setVisibility(View.GONE);
-            row.setOnClickListener(v -> {
-                android.widget.EditText e = findViewById(R.id.editQuery);
-                e.setText(word);
-                e.setSelection(word.length());
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    android.widget.EditText e = findViewById(R.id.editQuery);
+                    e.setText(word);
+                    e.setSelection(word.length());
+                }
             });
             listBox.addView(row);
         }
@@ -260,7 +294,12 @@ public class SearchActivity extends AppCompatActivity {
         list.remove(word);
         list.add(0, word);
         while (list.size() > RECENT_MAX) list.remove(list.size() - 1);
-        prefs().edit().putString(KEY_RECENT, String.join(SEP, list)).apply();
+        StringBuilder joined = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) joined.append(SEP);
+            joined.append(list.get(i));
+        }
+        prefs().edit().putString(KEY_RECENT, joined.toString()).apply();
     }
 
     private void paintStar(ImageView star, boolean on) {

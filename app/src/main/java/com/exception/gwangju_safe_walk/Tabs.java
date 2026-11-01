@@ -30,8 +30,8 @@ public final class Tabs {
                 MenuActivity.class);
     }
 
-    private static void bind(Activity a, int current, int self,
-                             int rowId, int iconId, int textId, Class<?> target) {
+    private static void bind(final Activity a, int current, int self,
+                             int rowId, int iconId, int textId, final Class<?> target) {
         View row = a.findViewById(rowId);
         if (row == null) return;
 
@@ -48,13 +48,15 @@ public final class Tabs {
             row.setOnClickListener(null);
             return;
         }
-        row.setOnClickListener(v -> {
-            Intent i = new Intent(a, target);
-
-            // 탭을 오갈 때 같은 화면이 쌓이지 않게 한다
-            i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            a.startActivity(i);
-            a.overridePendingTransition(0, 0);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // 탭을 오갈 때 같은 화면이 쌓이지 않게 한다
+                Intent i = new Intent(a, target);
+                i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                a.startActivity(i);
+                a.overridePendingTransition(0, 0);
+            }
         });
     }
 }

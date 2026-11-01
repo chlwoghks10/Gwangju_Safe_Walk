@@ -104,10 +104,13 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
             L.chip = findViewById(ids[i]);
             if (L.chip == null) continue;
             L.chip.setText(L.label);
-            L.chip.setOnClickListener(v -> {
-                L.on = !L.on;
-                styleChip(L);
-                redraw();
+            L.chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    L.on = !L.on;
+                    styleChip(L);
+                    redraw();
+                }
             });
             styleChip(L);
         }
@@ -126,20 +129,26 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
     }
 
     private void loadInBackground() {
-        new Thread(() -> {
-            for (Layer L : layers) {
-                try {
-                    if (L.file.endsWith(".geojson") || L.file.endsWith(".json")) readGeoJson(L);
-                    else readCsv(L);
-                    Log.i(TAG, L.label + " " + L.pts.size() + "지점 로드");
-                } catch (Exception e) {
-                    Log.e(TAG, L.label + " 로드 실패: " + e.getMessage());
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                for (Layer L : layers) {
+                    try {
+                        if (L.file.endsWith(".geojson") || L.file.endsWith(".json")) readGeoJson(L);
+                        else readCsv(L);
+                        Log.i(TAG, L.label + " " + L.pts.size() + "지점 로드");
+                    } catch (Exception e) {
+                        Log.e(TAG, L.label + " 로드 실패: " + e.getMessage());
+                    }
                 }
+                new Handler(Looper.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        dataReady = true;
+                        redraw();
+                    }
+                });
             }
-            new Handler(Looper.getMainLooper()).post(() -> {
-                dataReady = true;
-                redraw();
-            });
         }).start();
     }
 
@@ -237,13 +246,23 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
 
         naverMap.setMinZoom(11);
         naverMap.setMaxZoom(19);
-        naverMap.addOnCameraIdleListener(this::redraw);
+        naverMap.addOnCameraIdleListener(new NaverMap.OnCameraIdleListener() {
+            @Override
+            public void onCameraIdle() {
+                redraw();
+            }
+        });
 
         final double zoomForLocate = startZoom;
         View locate = findViewById(R.id.btnLocate);
         if (locate != null) {
-            locate.setOnClickListener(v ->
-                    naverMap.moveCamera(CameraUpdate.scrollAndZoomTo(MainActivity.CHOSUN, zoomForLocate)));
+            locate.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    naverMap.moveCamera(
+                            CameraUpdate.scrollAndZoomTo(MainActivity.CHOSUN, zoomForLocate));
+                }
+            });
         }
         redraw();
     }
@@ -291,7 +310,12 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
         hideRest();
 
         if (!waiting.isEmpty()) {
-            txtCount.setText(String.join("·", waiting) + " 은 확대하면 표시됩니다"
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < waiting.size(); i++) {
+                if (i > 0) names.append("·");
+                names.append(waiting.get(i));
+            }
+            txtCount.setText(names + " 은 확대하면 표시됩니다"
                     + (shownTotal > 0 ? "   (현재 " + shownTotal + "곳)" : ""));
         } else if (shownTotal == 0) {
             txtCount.setText("이 범위에 표시할 시설이 없습니다");

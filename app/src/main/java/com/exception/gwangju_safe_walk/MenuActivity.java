@@ -1,10 +1,12 @@
 package com.exception.gwangju_safe_walk;
 
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -33,25 +35,31 @@ public class MenuActivity extends AppCompatActivity {
 
         Ui.systemBars(this);
 
-        findViewById(R.id.rowCctv).setOnClickListener(v -> openMap("CCTV"));
-        findViewById(R.id.rowLight).setOnClickListener(v -> openMap("보안등"));
-        findViewById(R.id.rowBell).setOnClickListener(v -> openMap("비상벨"));
-        findViewById(R.id.rowPolice).setOnClickListener(v -> openMap("경찰서"));
+        bindMapRow(R.id.rowCctv, "CCTV");
+        bindMapRow(R.id.rowLight, "보안등");
+        bindMapRow(R.id.rowBell, "비상벨");
+        bindMapRow(R.id.rowPolice, "경찰서");
 
-        findViewById(R.id.rowServer).setOnClickListener(v -> askServer());
-        findViewById(R.id.rowTheme).setOnClickListener(v -> dialog("화면 색",
+        findViewById(R.id.rowServer).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                askServer();
+            }
+        });
+
+        bindDialogRow(R.id.rowTheme, "화면 색",
                 "해가 지면 어두운 색으로, 해가 뜨면 밝은 색으로 저절로 바뀝니다.\n\n"
                         + "날짜와 광주의 위경도로 그날의 일출·일몰 시각을 계산해서 정하므로, "
-                        + "인터넷에 연결되어 있지 않아도 동작합니다."));
+                        + "인터넷에 연결되어 있지 않아도 동작합니다.");
 
-        findViewById(R.id.rowPrinciple).setOnClickListener(v -> dialog("설계 원칙",
+        bindDialogRow(R.id.rowPrinciple, "설계 원칙",
                 "이 앱은 안전을 판정하지 않습니다.\n\n"
                         + "어느 길이 안전한지는 증명할 수 없습니다. 사고가 일어나지 않았다는 것은 "
                         + "측정되지 않기 때문입니다.\n\n"
                         + "대신 경로에 어떤 시설이 몇 개 있는지는 현장에서 확인할 수 있습니다. "
-                        + "이 앱은 그 정보를 제시하고, 어느 길로 갈지는 사용자가 판단합니다."));
+                        + "이 앱은 그 정보를 제시하고, 어느 길로 갈지는 사용자가 판단합니다.");
 
-        findViewById(R.id.rowSource).setOnClickListener(v -> dialog("데이터 출처",
+        bindDialogRow(R.id.rowSource, "데이터 출처",
                 "· 전국CCTV표준데이터 (행정안전부)\n"
                         + "· 전국보안등정보표준데이터\n"
                         + "· 전국안전비상벨위치표준데이터\n"
@@ -60,11 +68,11 @@ public class MenuActivity extends AppCompatActivity {
                         + "· 장소 검색 — 카카오 로컬\n"
                         + "· 보행자 경로 — Tmap\n\n"
                         + "공공데이터는 모두 공공데이터포털에서 개방된 자료이며, "
-                        + "좌표 결측과 중복 지점을 정제하여 사용합니다."));
+                        + "좌표 결측과 중복 지점을 정제하여 사용합니다.");
 
-        findViewById(R.id.rowTeam).setOnClickListener(v -> dialog("만든 사람",
+        bindDialogRow(R.id.rowTeam, "만든 사람",
                 "익셉션 (Exception)\n조선대학교 정보통신공학과\n\n"
-                        + "20233267 윤신혁\n20213148 최재환\n20233202 윤해준"));
+                        + "20233267 윤신혁\n20213148 최재환\n20233202 윤해준");
 
         countFacilities();
         Tabs.attach(this, Tabs.MORE);
@@ -106,18 +114,40 @@ public class MenuActivity extends AppCompatActivity {
                 .setMessage("경로 계산을 맡는 서버의 주소입니다.\n"
                         + "서버를 다시 시작하면 주소가 바뀔 수 있습니다.")
                 .setView(input)
-                .setPositiveButton("저장", (d, w) -> {
-                    String v = input.getText().toString().trim()
-                            .replace("http://", "").replace("https://", "");
-                    if (v.isEmpty()) return;
-                    if (!v.contains(":")) v = v + ":8000";
-                    getSharedPreferences(PREF, Context.MODE_PRIVATE)
-                            .edit().putString(KEY_SERVER, v).apply();
-                    showServer();
-                    Toast.makeText(this, "저장되었습니다", Toast.LENGTH_SHORT).show();
+                .setPositiveButton("저장", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        String v = input.getText().toString().trim()
+                                .replace("http://", "").replace("https://", "");
+                        if (v.isEmpty()) return;
+                        if (!v.contains(":")) v = v + ":8000";
+                        getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                                .edit().putString(KEY_SERVER, v).apply();
+                        showServer();
+                        Toast.makeText(MenuActivity.this, "저장되었습니다",
+                                Toast.LENGTH_SHORT).show();
+                    }
                 })
                 .setNegativeButton("취소", null)
                 .show();
+    }
+
+    private void bindMapRow(int rowId, final String only) {
+        findViewById(rowId).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openMap(only);
+            }
+        });
+    }
+
+    private void bindDialogRow(int rowId, final String title, final String body) {
+        findViewById(rowId).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog(title, body);
+            }
+        });
     }
 
     private void openMap(String only) {
@@ -135,18 +165,24 @@ public class MenuActivity extends AppCompatActivity {
     }
 
     private void countFacilities() {
-        new Thread(() -> {
-            final int cctv   = count("cctv.geojson");
-            final int light  = count("light.geojson");
-            final int bell   = count("bell.geojson");
-            final int police = count("police.geojson");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final int cctv   = count("cctv.geojson");
+                final int light  = count("light.geojson");
+                final int bell   = count("bell.geojson");
+                final int police = count("police.geojson");
 
-            new Handler(Looper.getMainLooper()).post(() -> {
-                set(R.id.cntCctv,   cctv);
-                set(R.id.cntLight,  light);
-                set(R.id.cntBell,   bell);
-                set(R.id.cntPolice, police);
-            });
+                new Handler(Looper.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        set(R.id.cntCctv,   cctv);
+                        set(R.id.cntLight,  light);
+                        set(R.id.cntBell,   bell);
+                        set(R.id.cntPolice, police);
+                    }
+                });
+            }
         }).start();
     }
 

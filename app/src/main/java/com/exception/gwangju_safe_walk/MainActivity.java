@@ -83,24 +83,62 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void setupClicks() {
-        View.OnClickListener toMap   = v -> openMap(null);
-        View.OnClickListener toRoute = v -> startActivity(new Intent(this, RouteActivity.class));
+        View.OnClickListener toMap = new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openMap(null);
+            }
+        };
+        View.OnClickListener toRoute = new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, RouteActivity.class));
+            }
+        };
 
         findViewById(R.id.btnExpandMap).setOnClickListener(toMap);
         findViewById(R.id.svcMap).setOnClickListener(toMap);
 
-        findViewById(R.id.layerCctv).setOnClickListener(v -> openMap("CCTV"));
-        findViewById(R.id.layerLight).setOnClickListener(v -> openMap("보안등"));
-        findViewById(R.id.layerBell).setOnClickListener(v -> openMap("비상벨"));
-        findViewById(R.id.layerPolice).setOnClickListener(v -> openMap("경찰서"));
+        findViewById(R.id.layerCctv).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openMap("CCTV");
+            }
+        });
+        findViewById(R.id.layerLight).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openMap("보안등");
+            }
+        });
+        findViewById(R.id.layerBell).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openMap("비상벨");
+            }
+        });
+        findViewById(R.id.layerPolice).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openMap("경찰서");
+            }
+        });
 
         findViewById(R.id.svcRoute).setOnClickListener(toRoute);
         findViewById(R.id.btnBannerGo).setOnClickListener(toRoute);
 
-        findViewById(R.id.cardMay).setOnClickListener(v ->
-                startActivity(new Intent(this, MayActivity.class)));
+        findViewById(R.id.cardMay).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, MayActivity.class));
+            }
+        });
 
-        findViewById(R.id.btnSettings).setOnClickListener(v ->
-                startActivity(new Intent(this, MenuActivity.class)));
+        findViewById(R.id.btnSettings).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, MenuActivity.class));
+            }
+        });
     }
 }

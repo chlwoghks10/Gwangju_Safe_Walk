@@ -1,8 +1,10 @@
 package com.exception.gwangju_safe_walk;
 
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.PointF;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.location.Location;
@@ -32,6 +34,7 @@ import com.naver.maps.map.NaverMap;
 import com.naver.maps.map.OnMapReadyCallback;
 import com.naver.maps.map.util.FusedLocationSource;
 import com.naver.maps.map.overlay.Marker;
+import com.naver.maps.map.overlay.Overlay;
 import com.naver.maps.map.overlay.PathOverlay;
 
 import org.json.JSONArray;
@@ -165,29 +168,77 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         editStart.setHint("눌러서 장소 검색 · 또는 지도를 탭");
         editEnd.setHint("눌러서 장소 검색 · 또는 지도를 탭");
 
-        editStart.setOnClickListener(v -> openSearch(true));
-        editEnd.setOnClickListener(v -> openSearch(false));
+        editStart.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openSearch(true);
+            }
+        });
+        editEnd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openSearch(false);
+            }
+        });
 
-        findViewById(R.id.btnBack).setOnClickListener(v -> finish());
-        btnSearch.setOnClickListener(v -> requestRoute());
+        findViewById(R.id.btnBack).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                finish();
+            }
+        });
+        btnSearch.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                requestRoute();
+            }
+        });
 
         locationSource = new FusedLocationSource(this, REQ_LOCATION);
 
         View locateBtn = findViewById(R.id.btnLocate);
-        if (locateBtn != null) locateBtn.setOnClickListener(v -> showMyLocationOnMap());
+        if (locateBtn != null) {
+            locateBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMyLocationOnMap();
+                }
+            });
+        }
 
-        voice = new Voice(this, (ready, message) -> ui.post(() -> {
-            if (ready) return;
-            // ui.post 로 넘겼으므로 이 시점에는 voice 가 들어가 있다
-            if (voice == null || !voice.isMuted()) btnMute.setText("음성 불가");
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-        }));
+        voice = new Voice(this, new Voice.Listener() {
+            @Override
+            public void onVoiceState(final boolean ready, final String message) {
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (ready) return;
+                        // ui.post 로 넘겼으므로 이 시점에는 voice 가 들어가 있다
+                        if (voice == null || !voice.isMuted()) btnMute.setText("음성 불가");
+                        Toast.makeText(RouteActivity.this, message, Toast.LENGTH_LONG).show();
+                    }
+                });
+            }
+        });
 
-        btnGuide.setOnClickListener(v -> startGuide());
-        btnVoiceTest.setOnClickListener(v -> voice.say("300미터 앞 좌회전입니다.", true));
-        btnMute.setOnClickListener(v -> {
-            boolean muted = voice.toggleMute();
-            btnMute.setText(muted ? "음성 꺼짐" : "음성 켜짐");
+        btnGuide.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startGuide();
+            }
+        });
+        btnVoiceTest.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                voice.say("300미터 앞 좌회전입니다.", true);
+            }
+        });
+        btnMute.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean muted = voice.toggleMute();
+                btnMute.setText(muted ? "음성 꺼짐" : "음성 켜짐");
+            }
         });
 
         FragmentManager fm = getSupportFragmentManager();
@@ -258,14 +309,18 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                 .setTitle("서버 주소")
                 .setMessage("EC2 를 다시 시작하면 주소가 바뀝니다.\n새 퍼블릭 IP 를 입력하세요.")
                 .setView(input)
-                .setPositiveButton("저장", (d, w) -> {
-                    String v = input.getText().toString().trim()
-                            .replace("http://", "").replace("https://", "");
-                    if (v.isEmpty()) return;
-                    if (!v.contains(":")) v = v + ":8000";
-                    getSharedPreferences(PREF, Context.MODE_PRIVATE)
-                            .edit().putString(KEY_SERVER, v).apply();
-                    Toast.makeText(this, "저장되었습니다", Toast.LENGTH_SHORT).show();
+                .setPositiveButton("저장", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        String v = input.getText().toString().trim()
+                                .replace("http://", "").replace("https://", "");
+                        if (v.isEmpty()) return;
+                        if (!v.contains(":")) v = v + ":8000";
+                        getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                                .edit().putString(KEY_SERVER, v).apply();
+                        Toast.makeText(RouteActivity.this, "저장되었습니다",
+                                Toast.LENGTH_SHORT).show();
+                    }
                 })
                 .setNegativeButton("취소", null)
                 .show();
@@ -276,10 +331,20 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         naverMap = map;
         naverMap.setNightModeEnabled(SunTime.isNight(35.1400, 126.9270));
         naverMap.moveCamera(CameraUpdate.scrollAndZoomTo(MainActivity.CHOSUN, 15));
-        naverMap.setOnMapClickListener((point, coord) -> onMapTapped(coord));
+        naverMap.setOnMapClickListener(new NaverMap.OnMapClickListener() {
+            @Override
+            public void onMapClick(PointF point, LatLng coord) {
+                onMapTapped(coord);
+            }
+        });
 
         naverMap.setLocationSource(locationSource);
-        naverMap.addOnLocationChangeListener(this::onLocationChanged);
+        naverMap.addOnLocationChangeListener(new NaverMap.OnLocationChangeListener() {
+            @Override
+            public void onLocationChange(Location loc) {
+                onLocationChanged(loc);
+            }
+        });
         naverMap.getUiSettings().setZoomControlEnabled(false);
 
         applyPendingDest();
@@ -432,45 +497,65 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         btnSearch.setText("계산 중…");
         btnSearch.setEnabled(false);
 
-        io.execute(() -> {
-            String url = String.format(Locale.US,
-                    "http://%s/route?start_lat=%f&start_lon=%f&end_lat=%f&end_lon=%f",
-                    host, startPoint.latitude, startPoint.longitude,
-                    endPoint.latitude, endPoint.longitude);
-            try {
-                String body = httpGet(url);
-                JSONObject json = new JSONObject(body);
-                ui.post(() -> {
-                    btnSearch.setText("경로 비교하기");
-                    btnSearch.setEnabled(true);
-                    showResult(json);
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "요청 실패: " + e.getMessage(), e);
-                final String msg = e.getMessage() == null ? "알 수 없는 오류" : e.getMessage();
-                ui.post(() -> {
-                    btnSearch.setText("경로 비교하기");
-                    btnSearch.setEnabled(true);
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                String url = String.format(Locale.US,
+                        "http://%s/route?start_lat=%f&start_lon=%f&end_lat=%f&end_lon=%f",
+                        host, startPoint.latitude, startPoint.longitude,
+                        endPoint.latitude, endPoint.longitude);
+                try {
+                    String body = httpGet(url);
+                    final JSONObject json = new JSONObject(body);
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            btnSearch.setText("경로 비교하기");
+                            btnSearch.setEnabled(true);
+                            showResult(json);
+                        }
+                    });
+                } catch (Exception e) {
+                    Log.e(TAG, "요청 실패: " + e.getMessage(), e);
+                    final String msg =
+                            e.getMessage() == null ? "알 수 없는 오류" : e.getMessage();
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            btnSearch.setText("경로 비교하기");
+                            btnSearch.setEnabled(true);
 
-                    // 서버가 한글로 이유를 돌려준 경우는 연결 실패가 아니라 거부다
-                    boolean refused = msg.contains("도로망") || msg.contains("가깝습니다")
-                            || msg.contains("이어지지");
-                    if (refused) {
-                        new AlertDialog.Builder(this)
-                                .setTitle("경로를 만들 수 없습니다")
-                                .setMessage(msg + "\n\n현재 도로망은 조선대 주변 2km 입니다.")
-                                .setPositiveButton("닫기", null)
-                                .show();
-                    } else {
-                        new AlertDialog.Builder(this)
-                                .setTitle("서버에 연결하지 못했습니다")
-                                .setMessage(msg + "\n\n현재 주소: " + host
-                                        + "\n\nEC2 를 다시 시작했다면 주소가 바뀌었을 수 있습니다.")
-                                .setPositiveButton("주소 변경", (d, w) -> askServer())
-                                .setNegativeButton("닫기", null)
-                                .show();
-                    }
-                });
+                            // 서버가 한글로 이유를 돌려준 경우는 연결 실패가 아니라 거부다
+                            boolean refused = msg.contains("도로망")
+                                    || msg.contains("가깝습니다")
+                                    || msg.contains("이어지지");
+                            if (refused) {
+                                new AlertDialog.Builder(RouteActivity.this)
+                                        .setTitle("경로를 만들 수 없습니다")
+                                        .setMessage(msg
+                                                + "\n\n현재 도로망은 조선대 주변 2km 입니다.")
+                                        .setPositiveButton("닫기", null)
+                                        .show();
+                            } else {
+                                new AlertDialog.Builder(RouteActivity.this)
+                                        .setTitle("서버에 연결하지 못했습니다")
+                                        .setMessage(msg + "\n\n현재 주소: " + host
+                                                + "\n\nEC2 를 다시 시작했다면 주소가"
+                                                + " 바뀌었을 수 있습니다.")
+                                        .setPositiveButton("주소 변경",
+                                                new DialogInterface.OnClickListener() {
+                                                    @Override
+                                                    public void onClick(DialogInterface d,
+                                                                        int w) {
+                                                        askServer();
+                                                    }
+                                                })
+                                        .setNegativeButton("닫기", null)
+                                        .show();
+                            }
+                        }
+                    });
+                }
             }
         });
     }
@@ -512,8 +597,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
             clearRoutes();
 
-            // 서버는 탭한 지점을 가장 가까운 도로 위로 옮겨 경로를 만든다.
-            // 마커도 같이 옮기지 않으면 마커와 경로선이 떨어져 보인다.
+            // 서버가 경로를 도로 위에서 시작하므로 마커도 같이 옮긴다
             JSONObject snap = json.optJSONObject("snap");
             if (snap != null) {
                 JSONArray s0 = snap.optJSONArray("start");
@@ -548,9 +632,12 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                 p.setCoords(r.pts);
                 p.setOutlineWidth(0);
                 p.setMap(naverMap);
-                p.setOnClickListener(o -> {
-                    select(idx);
-                    return true;
+                p.setOnClickListener(new Overlay.OnClickListener() {
+                    @Override
+                    public boolean onClick(Overlay o) {
+                        select(idx);
+                        return true;
+                    }
                 });
                 r.overlay = p;
             }
@@ -606,7 +693,12 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             chip.setPadding(dp(16), dp(9), dp(16), dp(9));
             chip.setClickable(true);
             chip.setFocusable(true);
-            chip.setOnClickListener(v -> select(idx));
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    select(idx);
+                }
+            });
 
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -744,10 +836,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                 : "안내 중지 (" + Math.min(nextTurn + 1, total) + "/" + total + ")");
     }
 
-    /**
-     * 걷는 동안 위치가 들어올 때마다, 다음 안내 지점까지 거리를 재서 가까워지면 읽어 준다.
-     * 팀장이 준 voiceGuide.js 의 onPosition 과 같은 방식이다.
-     */
+    // 위치가 들어올 때마다 다음 안내 지점까지 거리를 재서 가까워지면 읽어 준다
     private void checkGuide(Location loc) {
         if (!guiding || routes.isEmpty()) return;
         List<Turn> ts = routes.get(selected).turns;
