@@ -4,9 +4,11 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.fragment.app.FragmentManager;
 
 import com.naver.maps.geometry.LatLng;
@@ -30,8 +32,28 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         setupMiniMap();
         setupClicks();
         showSunset();
+        setupScreenMode();
 
         Tabs.attach(this, Tabs.HOME);
+    }
+
+    // 제목 왼쪽 달 표시를 누르면 자동, 낮, 야간 순으로 바뀐다
+    private void setupScreenMode() {
+        View btn = findViewById(R.id.btnScreenMode);
+        if (btn == null) return;
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int m = SunTime.cycle(MainActivity.this);
+                Toast.makeText(MainActivity.this,
+                        SunTime.modeText(m), Toast.LENGTH_SHORT).show();
+                AppCompatDelegate.setDefaultNightMode(
+                        SunTime.isNight(CHOSUN.latitude, CHOSUN.longitude)
+                                ? AppCompatDelegate.MODE_NIGHT_YES
+                                : AppCompatDelegate.MODE_NIGHT_NO);
+                recreate();
+            }
+        });
     }
 
     @Override

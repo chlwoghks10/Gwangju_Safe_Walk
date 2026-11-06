@@ -1,5 +1,6 @@
 package com.exception.gwangju_safe_walk;
 
+import android.content.DialogInterface;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
@@ -7,8 +8,10 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.fragment.app.FragmentManager;
 
@@ -19,6 +22,7 @@ import com.naver.maps.map.MapFragment;
 import com.naver.maps.map.NaverMap;
 import com.naver.maps.map.OnMapReadyCallback;
 import com.naver.maps.map.UiSettings;
+import com.naver.maps.map.Symbol;
 import com.naver.maps.map.overlay.Marker;
 import com.naver.maps.map.util.MarkerIcons;
 
@@ -226,6 +230,16 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
 
         naverMap.setNightModeEnabled(SunTime.isNight(35.1400, 126.9270));
 
+        // 지도에 적힌 상호(약국·학교·병원 등)를 누르면 저장할지 묻는다
+        naverMap.setOnSymbolClickListener(new NaverMap.OnSymbolClickListener() {
+            @Override
+            public boolean onSymbolClick(@NonNull Symbol symbol) {
+                askSave(symbol.getCaption(),
+                        symbol.getPosition().latitude, symbol.getPosition().longitude);
+                return true;
+            }
+        });
+
         String only = getIntent().getStringExtra("only");
         double startZoom = 16;
         if (only != null) {
@@ -339,5 +353,30 @@ public class MapActivity extends AppCompatActivity implements OnMapReadyCallback
             Marker m = pool.get(i);
             if (m.getMap() != null) m.setMap(null);
         }
+    }
+
+    // 지도에서 누른 상호를 저장 목록에 넣거나 뺀다
+    private void askSave(String name, final double lat, final double lon) {
+        if (name == null || name.trim().isEmpty()) {
+            Toast.makeText(this, "이름이 없는 장소는 저장할 수 없습니다", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String title = name.replace("\n", " ").trim();
+        boolean on = Saved.has(this, title);
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(on ? "저장 목록에서 뺄까요?" : "저장 목록에 넣을까요?")
+                .setPositiveButton(on ? "빼기" : "저장", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        boolean now = Saved.toggle(MapActivity.this, title, lat, lon);
+                        Toast.makeText(MapActivity.this,
+                                now ? "저장했습니다" : "저장을 해제했습니다",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("취소", null)
+                .show();
     }
 }

@@ -13,6 +13,8 @@ public class SplashActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // 사용자가 정해 둔 화면 모드를 먼저 읽는다
+        SunTime.load(this);
         AppCompatDelegate.setDefaultNightMode(
                 SunTime.isNight(35.1400, 126.9270)
                         ? AppCompatDelegate.MODE_NIGHT_YES

@@ -1,5 +1,7 @@
 package com.exception.gwangju_safe_walk;
 
+import android.content.Context;
+
 import java.util.Calendar;
 
 public final class SunTime {
@@ -8,6 +10,38 @@ public final class SunTime {
     private static final double ZENITH = 90.833;
 
     private static final double TZ = 9.0;
+
+    // 메인화면 달 버튼으로 정한 화면 모드
+    public static final int AUTO  = 0;   // 해가 지면 야간
+    public static final int DAY   = 1;   // 늘 낮
+    public static final int NIGHT = 2;   // 늘 야간
+
+    private static final String PREF = "safewalk";
+    private static final String KEY_MODE = "screen_mode";
+    private static int mode = AUTO;
+
+    // 앱이 켜질 때 한 번 불러 둔다
+    public static void load(Context c) {
+        mode = c.getSharedPreferences(PREF, Context.MODE_PRIVATE).getInt(KEY_MODE, AUTO);
+    }
+
+    public static int mode() {
+        return mode;
+    }
+
+    // 자동, 낮, 야간 순으로 돌아가며 바뀐다
+    public static int cycle(Context c) {
+        mode = (mode + 1) % 3;
+        c.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                .edit().putInt(KEY_MODE, mode).apply();
+        return mode;
+    }
+
+    public static String modeText(int m) {
+        if (m == DAY) return "낮 모드";
+        if (m == NIGHT) return "야간 모드";
+        return "자동 (해가 지면 야간)";
+    }
 
     public static double calc(int year, int month, int day,
                               double lat, double lon, boolean rising) {
@@ -49,6 +83,10 @@ public final class SunTime {
     }
 
     public static boolean isNight(double lat, double lon) {
+        // 사용자가 직접 정해 둔 값이 있으면 해 계산보다 먼저다
+        if (mode == DAY) return false;
+        if (mode == NIGHT) return true;
+
         Calendar c = Calendar.getInstance();
         double rise = calc(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1,
                 c.get(Calendar.DAY_OF_MONTH), lat, lon, true);

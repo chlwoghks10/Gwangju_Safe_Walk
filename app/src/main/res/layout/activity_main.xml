@@ -30,13 +30,16 @@
                 android:paddingBottom="16dp">
 
                 <ImageView
+                    android:id="@+id/btnScreenMode"
                     android:layout_width="34dp"
                     android:layout_height="34dp"
                     android:background="@drawable/bg_circle"
                     android:backgroundTint="@color/brand_soft"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:padding="7dp"
                     android:src="@drawable/ic_moon"
-                    android:contentDescription="로고"
+                    android:contentDescription="화면 모드 바꾸기"
                     android:tint="@color/brand" />
 
                 <TextView

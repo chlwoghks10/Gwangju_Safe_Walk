@@ -13,9 +13,11 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -27,6 +29,7 @@ import androidx.fragment.app.FragmentManager;
 
 import com.naver.maps.geometry.LatLng;
 import com.naver.maps.geometry.LatLngBounds;
+import com.naver.maps.map.CameraPosition;
 import com.naver.maps.map.CameraUpdate;
 import com.naver.maps.map.LocationTrackingMode;
 import com.naver.maps.map.MapFragment;
@@ -79,7 +82,16 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     private View routeColorBar;
     private TextView txtRouteName, txtRouteTime, txtRouteMeta, txtRouteArrive;
     private LinearLayout facBox;
-    private TextView btnGuide, btnVoiceTest, btnMute;
+    private TextView btnGuide, btnMute;
+    private View bottomSheet, sheetHandle;
+    private int sheetMinH, sheetMaxH;
+    private float dragStartY;
+    private int dragStartH;
+    private boolean dragMoved;
+
+    private View turnBand;
+    private ImageView imgTurn;
+    private TextView txtTurnDist, txtTurnText;
 
     private LatLng startPoint, endPoint;
     private Marker startMarker, endMarker;
@@ -87,6 +99,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private static final String[] FAC_KEYS   = {"light", "cctv", "bell", "police"};
     private static final String[] FAC_NAMES  = {"보안등", "CCTV", "비상벨", "경찰서"};
+    private static final String[] FAC_UNITS  = {"곳", "곳", "곳", "곳"};
     private static final int[]    FAC_COLORS = {
             Color.rgb(232, 161,  58),
             Color.rgb( 31, 111, 235),
@@ -105,14 +118,40 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private Voice voice;
 
-    // 안내 지점 몇 m 앞에서 읽어 줄지 (팀장 voiceGuide.js 의 TRIGGER_M 과 같은 값)
+    // 안내 지점 몇 m 앞에서 읽어 줄지
     private static final double TRIGGER_M = 30;
+
+    // 이보다 가까워지면 그 지점을 지난 것으로 보고 다음으로 넘긴다
+    private static final double PASS_M = 12;
+
+    // 걷는 동안 서버에 위치를 보내는 간격
+    private static final long TRACK_EVERY_MS = 5000;
+
+    // 경로에서 이보다 멀면 지나온 길을 지우지 않는다
+    private static final double ON_ROUTE_M = 60;
+
+    // 경로 출발점에서 이보다 멀리 떨어진 채로 안내를 켜면 먼저 확인을 받는다
+    private static final double START_NEAR_M = 200;
+
+    // 안내 중 화면을 기울이는 각도 (도). 0이면 위에서 내려다보는 평면
+    private static final double NAV_TILT = 45;
+
     private boolean guiding = false;
     private int nextTurn = 0;
+    private int saidTurn = -1;
+    private String navId = null;
+    private long lastTrackMs = 0;
+    private boolean tracking = false;
+    private PathOverlay navOverlay;
+    private double remainM = -1;
+    private Location myLoc;
+    private int lastPathIndex = -1;
+    private boolean doneSaid = false;
 
     private static class Turn {
         final double lat, lon;
         final String text;
+        int pathIndex = -1;          // 경로 좌표열에서 이 지점이 몇 번째인지
         Turn(double lat, double lon, String text) {
             this.lat = lat; this.lon = lon; this.text = text;
         }
@@ -129,6 +168,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         List<Turn> turns = new ArrayList<>();
         boolean sameAsShortest;
         PathOverlay overlay;
+        String navId;
 
         int minutes() {
             return Math.max(1, (int) Math.round(lengthM / WALK_M_PER_MIN));
@@ -160,8 +200,13 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         txtRouteArrive = findViewById(R.id.txtRouteArrive);
         facBox         = findViewById(R.id.facBox);
         btnGuide       = findViewById(R.id.btnGuide);
-        btnVoiceTest   = findViewById(R.id.btnVoiceTest);
         btnMute        = findViewById(R.id.btnMute);
+        bottomSheet    = findViewById(R.id.bottomSheet);
+        sheetHandle    = findViewById(R.id.sheetHandle);
+        turnBand       = findViewById(R.id.turnBand);
+        imgTurn        = findViewById(R.id.imgTurn);
+        txtTurnDist    = findViewById(R.id.txtTurnDist);
+        txtTurnText    = findViewById(R.id.txtTurnText);
 
         editStart.setFocusable(false);
         editEnd.setFocusable(false);
@@ -206,6 +251,8 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             });
         }
 
+        setupSheetDrag();
+
         voice = new Voice(this, new Voice.Listener() {
             @Override
             public void onVoiceState(final boolean ready, final String message) {
@@ -213,7 +260,6 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                     @Override
                     public void run() {
                         if (ready) return;
-                        // ui.post 로 넘겼으므로 이 시점에는 voice 가 들어가 있다
                         if (voice == null || !voice.isMuted()) btnMute.setText("음성 불가");
                         Toast.makeText(RouteActivity.this, message, Toast.LENGTH_LONG).show();
                     }
@@ -224,13 +270,9 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         btnGuide.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                startGuide();
-            }
-        });
-        btnVoiceTest.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                voice.say("300미터 앞 좌회전입니다.", true);
+                if (routes.isEmpty()) return;
+                if (guiding) stopGuide();
+                else startGuide();
             }
         });
         btnMute.setOnClickListener(new View.OnClickListener() {
@@ -363,7 +405,15 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     }
 
     private void onLocationChanged(@NonNull Location loc) {
-        checkGuide(loc);
+        myLoc = loc;
+
+        // 안내 중일 때만 지나온 길을 지우고 위치를 서버에 보고한다
+        if (guiding) {
+            paintRemaining(loc);
+            checkGuide(loc);
+            paintTurnBand(loc);
+            track(loc.getLatitude(), loc.getLongitude());
+        }
 
         // 버튼을 누른 직후 한 번만 쓴다. 계속 덮어쓰면 출발지가 따라 움직인다
         if (wantMyLocation == WANT_NONE) return;
@@ -664,6 +714,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         r.json = o;
         r.pts = coords(o.getJSONArray("coords"));
         r.lengthM = o.getDouble("length_m");
+        r.navId = o.optString("nav_id", null);
         r.extraM = r.lengthM - shortestM;
         r.sameAsShortest = same;
         for (int i = 0; i < FAC_KEYS.length; i++) r.fac[i] = o.optInt(FAC_KEYS[i], 0);
@@ -677,7 +728,24 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                         t.optString("text", "")));
             }
         }
+        markTurnIndexes(r);
         return r;
+    }
+
+    // 회전 지점이 경로 좌표열에서 몇 번째인지 미리 구해 둔다.
+    // 지나쳐 버린 지점을 건너뛸 때 쓴다
+    private void markTurnIndexes(RouteInfo r) {
+        float[] out = new float[1];
+        for (Turn t : r.turns) {
+            int best = -1;
+            double bestD = Double.MAX_VALUE;
+            for (int i = 0; i < r.pts.size(); i++) {
+                Location.distanceBetween(t.lat, t.lon,
+                        r.pts.get(i).latitude, r.pts.get(i).longitude, out);
+                if (out[0] < bestD) { bestD = out[0]; best = i; }
+            }
+            t.pathIndex = best;
+        }
     }
 
     private void buildTabs() {
@@ -712,7 +780,13 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private void select(int index) {
         if (index < 0 || index >= routes.size()) return;
+        if (guiding && index != selected) {
+            Toast.makeText(this, "안내를 멈춘 뒤에 다른 경로를 고를 수 있습니다",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
         selected = index;
+        if (!guiding) { nextTurn = 0; saidTurn = -1; }
 
         for (int i = 0; i < tabBox.getChildCount() && i < routes.size(); i++) {
             TextView chip = (TextView) tabBox.getChildAt(i);
@@ -739,9 +813,6 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             r.overlay.setZIndex(on ? 100 : 0);
         }
 
-        nextTurn = 0;
-        if (guiding) paintGuideButton();
-
         drawFacilities(routes.get(selected).json);
         updateDetail();
     }
@@ -759,6 +830,14 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         txtRouteTime.setText(r.minutes() + "분");
 
         StringBuilder meta = new StringBuilder();
+        if (guiding && remainM >= 0) {
+            txtRouteTime.setText(
+                    Math.max(1, (int) Math.round(remainM / WALK_M_PER_MIN)) + "분");
+            txtRouteMeta.setText(String.format(Locale.KOREA, "남은 거리 %,.0f m", remainM));
+            paintArrive(remainM, true);
+            paintFacilities(r);
+            return;
+        }
         meta.append(String.format(Locale.KOREA, "%,.0f m", r.lengthM));
         if (r.sameAsShortest) {
             meta.append(" · 최단 경로와 같은 길");
@@ -769,18 +848,28 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         }
         txtRouteMeta.setText(meta.toString());
 
+        paintArrive(r.lengthM, false);
+        paintFacilities(r);
+    }
+
+    // 남은 거리로 도착 시각을 적는다
+    private void paintArrive(double meters, boolean walking) {
+        int mins = Math.max(1, (int) Math.round(meters / WALK_M_PER_MIN));
         Calendar c = Calendar.getInstance();
-        c.add(Calendar.MINUTE, r.minutes());
+        c.add(Calendar.MINUTE, mins);
         int h = c.get(Calendar.HOUR_OF_DAY);
         String ampm = h < 12 ? "오전" : "오후";
         int h12 = h % 12 == 0 ? 12 : h % 12;
         txtRouteArrive.setText(String.format(Locale.KOREA,
-                "지금 출발하면 %s %d:%02d 도착", ampm, h12, c.get(Calendar.MINUTE)));
+                "%s %s %d:%02d 도착", walking ? "이대로 걸으면" : "지금 출발하면",
+                ampm, h12, c.get(Calendar.MINUTE)));
+    }
 
+    private void paintFacilities(RouteInfo r) {
         facBox.removeAllViews();
         for (int i = 0; i < FAC_KEYS.length; i++) {
             TextView t = new TextView(this);
-            t.setText(FAC_NAMES[i] + " " + r.fac[i]);
+            t.setText(FAC_NAMES[i] + " " + r.fac[i] + FAC_UNITS[i]);
             t.setTextSize(12);
             t.setTextColor(r.fac[i] > 0 ? FAC_COLORS[i] : Color.rgb(137, 146, 168));
             t.setPadding(dp(11), dp(6), dp(11), dp(6));
@@ -798,62 +887,6 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
             facBox.addView(t);
         }
-    }
-
-    private void startGuide() {
-        if (routes.isEmpty()) return;
-        if (guiding) { stopGuide(); return; }
-
-        RouteInfo r = routes.get(selected);
-        guiding = true;
-        nextTurn = 0;
-
-        // 걷는 동안 위치가 계속 들어와야 안내 지점을 지나는지 알 수 있다
-        if (naverMap != null) naverMap.setLocationTrackingMode(LocationTrackingMode.Follow);
-
-        voice.say(r.name + " 경로로 안내를 시작합니다. 총 "
-                + Voice.distanceText(r.lengthM) + ", 도보 " + r.minutes() + "분입니다.", true);
-
-        if (r.turns.isEmpty()) {
-            Toast.makeText(this, "이 경로에는 회전 안내 정보가 없습니다", Toast.LENGTH_SHORT).show();
-        }
-        paintGuideButton();
-    }
-
-    private void stopGuide() {
-        guiding = false;
-        nextTurn = 0;
-        if (voice != null) voice.stop();
-        if (naverMap != null) naverMap.setLocationTrackingMode(LocationTrackingMode.NoFollow);
-        paintGuideButton();
-    }
-
-    private void paintGuideButton() {
-        if (!guiding) { btnGuide.setText("안내 시작"); return; }
-        List<Turn> ts = routes.isEmpty() ? null : routes.get(selected).turns;
-        int total = (ts == null) ? 0 : ts.size();
-        btnGuide.setText(total == 0 ? "안내 중지"
-                : "안내 중지 (" + Math.min(nextTurn + 1, total) + "/" + total + ")");
-    }
-
-    // 위치가 들어올 때마다 다음 안내 지점까지 거리를 재서 가까워지면 읽어 준다
-    private void checkGuide(Location loc) {
-        if (!guiding || routes.isEmpty()) return;
-        List<Turn> ts = routes.get(selected).turns;
-        if (nextTurn >= ts.size()) return;
-
-        Turn t = ts.get(nextTurn);
-        float[] out = new float[1];
-        Location.distanceBetween(loc.getLatitude(), loc.getLongitude(), t.lat, t.lon, out);
-        if (out[0] > TRIGGER_M) return;
-
-        String msg = (int) TRIGGER_M + "미터 앞 " + t.text + "입니다.";
-        voice.say(msg, true);
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-        nextTurn++;
-        paintGuideButton();
-
-        if (nextTurn >= ts.size()) voice.say("안내를 마칩니다.");
     }
 
     private void drawFacilities(JSONObject route) {
@@ -913,5 +946,357 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         io.shutdownNow();
         if (voice != null) voice.shutdown();
         super.onDestroy();
+    }
+
+    private void startGuide() {
+        final RouteInfo r = routes.get(selected);
+
+        // 경로 출발점에서 멀리 떨어진 채로 켜면 경로 이탈로 잡혀 엉뚱하게 동작한다
+        double away = distanceToStart(r);
+        if (away > START_NEAR_M) {
+            new AlertDialog.Builder(this)
+                    .setTitle("출발지에서 떨어져 있습니다")
+                    .setMessage(String.format(Locale.KOREA,
+                            "현재 위치가 경로 출발점에서 %,.0f m 떨어져 있습니다.\n\n"
+                            + "안내는 출발점에서 시작해야 남은 거리와 음성이 맞습니다.", away))
+                    .setPositiveButton("내 위치에서 다시 찾기",
+                            new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface d, int w) {
+                                    useMyLocationAsStart();
+                                }
+                            })
+                    .setNeutralButton("그래도 시작", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int w) {
+                            beginGuide(r);
+                        }
+                    })
+                    .setNegativeButton("취소", null)
+                    .show();
+            return;
+        }
+        beginGuide(r);
+    }
+
+    // 현재 위치에서 경로 출발점까지 거리. 위치를 아직 못 받았으면 -1
+    private double distanceToStart(RouteInfo r) {
+        if (myLoc == null || r.pts.isEmpty()) return -1;
+        float[] out = new float[1];
+        Location.distanceBetween(myLoc.getLatitude(), myLoc.getLongitude(),
+                r.pts.get(0).latitude, r.pts.get(0).longitude, out);
+        return out[0];
+    }
+
+    // 출발지를 내 위치로 바꾸고 경로를 다시 찾는다
+    private void useMyLocationAsStart() {
+        if (myLoc == null) {
+            Toast.makeText(this, "현재 위치를 아직 못 받았습니다", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        setStart(new LatLng(myLoc.getLatitude(), myLoc.getLongitude()), "내 위치");
+        requestRoute();
+    }
+
+    private void beginGuide(RouteInfo r) {
+        guiding = true;
+        nextTurn = 0;
+        saidTurn = -1;
+        doneSaid = false;
+        lastPathIndex = -1;
+        navId = r.navId;
+        remainM = r.lengthM;
+        lastTrackMs = 0;
+
+        // 실제 내비처럼 화면을 기울이고, 진행 방향이 위로 오게 돌린다
+        if (naverMap != null) {
+            if (myLoc != null) {
+                naverMap.moveCamera(CameraUpdate.toCameraPosition(new CameraPosition(
+                        new LatLng(myLoc.getLatitude(), myLoc.getLongitude()),
+                        17, NAV_TILT, myLoc.getBearing())));
+            }
+            naverMap.setLocationTrackingMode(LocationTrackingMode.Face);
+        }
+
+        voice.say(r.name + " 경로로 안내를 시작합니다. 총 "
+                + Voice.distanceText(r.lengthM) + ", 도보 " + r.minutes() + "분입니다.", true);
+
+        if (r.turns.isEmpty()) {
+            Toast.makeText(this, "이 경로에는 회전 안내 정보가 없습니다", Toast.LENGTH_SHORT).show();
+        }
+        if (myLoc != null) {
+            paintRemaining(myLoc);
+            paintTurnBand(myLoc);
+        }
+        paintGuideButton();
+        updateDetail();
+    }
+
+    private void stopGuide() {
+        guiding = false;
+        nextTurn = 0;
+        saidTurn = -1;
+        doneSaid = false;
+        lastPathIndex = -1;
+        navId = null;
+        remainM = -1;
+        clearNavOverlay();
+        if (turnBand != null) turnBand.setVisibility(View.GONE);
+        if (voice != null) voice.stop();
+        if (naverMap != null) {
+            naverMap.setLocationTrackingMode(LocationTrackingMode.NoFollow);
+            // 기울기와 회전을 원래대로 돌린다
+            CameraPosition cur = naverMap.getCameraPosition();
+            naverMap.moveCamera(CameraUpdate.toCameraPosition(
+                    new CameraPosition(cur.target, cur.zoom, 0, 0)));
+        }
+        paintGuideButton();
+        if (!routes.isEmpty() && selected < routes.size()) updateDetail();
+    }
+
+    private void clearNavOverlay() {
+        if (navOverlay != null) {
+            navOverlay.setMap(null);
+            navOverlay = null;
+        }
+        for (RouteInfo r : routes) {
+            if (r.overlay != null) r.overlay.setMap(naverMap);
+        }
+    }
+
+    private void paintGuideButton() {
+        if (btnGuide == null) return;
+        if (!guiding) { btnGuide.setText("이 경로로 안내 시작"); return; }
+        List<Turn> ts = routes.isEmpty() ? null : routes.get(selected).turns;
+        int total = (ts == null) ? 0 : ts.size();
+        btnGuide.setText(total == 0 ? "안내 중지"
+                : "안내 중지 (" + Math.min(nextTurn + 1, total) + "/" + total + ")");
+    }
+
+    // 지나온 부분을 지우고 남은 길만 굵게 다시 그린다
+    private void paintRemaining(Location loc) {
+        if (routes.isEmpty() || naverMap == null) return;
+        RouteInfo r = routes.get(selected);
+        List<LatLng> p = r.pts;
+        if (p.size() < 2) return;
+
+        int best = 0;
+        double bestD = Double.MAX_VALUE;
+        float[] out = new float[1];
+        for (int i = 0; i < p.size(); i++) {
+            Location.distanceBetween(loc.getLatitude(), loc.getLongitude(),
+                    p.get(i).latitude, p.get(i).longitude, out);
+            if (out[0] < bestD) { bestD = out[0]; best = i; }
+        }
+        if (bestD > ON_ROUTE_M) return;
+        lastPathIndex = best;
+        if (best > p.size() - 2) best = p.size() - 2;
+
+        List<LatLng> rest = new ArrayList<>();
+        rest.add(new LatLng(loc.getLatitude(), loc.getLongitude()));
+        for (int i = best + 1; i < p.size(); i++) rest.add(p.get(i));
+        if (rest.size() < 2) return;
+
+        if (r.overlay != null) r.overlay.setMap(null);
+        if (navOverlay == null) {
+            navOverlay = new PathOverlay();
+            navOverlay.setOutlineWidth(0);
+        }
+        navOverlay.setCoords(rest);
+        navOverlay.setColor(r.color);
+        navOverlay.setWidth(dp(7));
+        navOverlay.setMap(naverMap);
+    }
+
+    // 화면 위 띠에 다음 회전을 거리와 함께 띄운다. 지날 때까지 같은 지점을 보여 준다
+    private void paintTurnBand(Location loc) {
+        if (turnBand == null) return;
+        if (!guiding || routes.isEmpty()) { turnBand.setVisibility(View.GONE); return; }
+
+        List<Turn> ts = routes.get(selected).turns;
+        if (nextTurn >= ts.size()) {
+            txtTurnDist.setText("");
+            txtTurnText.setText("목적지까지 직진");
+            if (imgTurn != null) imgTurn.setImageResource(R.drawable.ic_turn_straight);
+            turnBand.setVisibility(View.VISIBLE);
+            return;
+        }
+        Turn t = ts.get(nextTurn);
+        float[] out = new float[1];
+        Location.distanceBetween(loc.getLatitude(), loc.getLongitude(), t.lat, t.lon, out);
+        txtTurnDist.setText(String.format(Locale.KOREA, "%,.0f m", out[0]));
+        txtTurnText.setText(t.text);
+        if (imgTurn != null) imgTurn.setImageResource(turnIcon(t.text));
+        turnBand.setVisibility(View.VISIBLE);
+    }
+
+    // 안내 문구에서 방향을 읽어 아이콘을 고른다.
+    // 최단·안심 A 는 "좌회전"/"우회전", 안심 B 는 "○○에서 좌회전" 처럼 온다
+    private static int turnIcon(String text) {
+        if (text == null) return R.drawable.ic_turn_straight;
+        if (text.contains("유턴")) return R.drawable.ic_turn_uturn;
+        if (text.contains("좌회전") || text.contains("왼쪽")) return R.drawable.ic_turn_left;
+        if (text.contains("우회전") || text.contains("오른쪽")) return R.drawable.ic_turn_right;
+        return R.drawable.ic_turn_straight;
+    }
+
+    // 30m 앞에서 읽어 주고, 12m 안에 들어오면 지난 것으로 보고 다음 지점으로 넘긴다
+    private void checkGuide(Location loc) {
+        if (!guiding || routes.isEmpty()) return;
+        List<Turn> ts = routes.get(selected).turns;
+
+        // GPS 가 튀어 12m 안에 못 들어가도 멈추지 않게, 이미 지나친 지점은 건너뛴다
+        while (nextTurn < ts.size()
+                && ts.get(nextTurn).pathIndex >= 0
+                && lastPathIndex > ts.get(nextTurn).pathIndex) {
+            nextTurn++;
+            paintGuideButton();
+        }
+        if (nextTurn >= ts.size()) {
+            if (!doneSaid) {
+                doneSaid = true;
+                voice.say("안내를 마칩니다.");
+            }
+            return;
+        }
+
+        Turn t = ts.get(nextTurn);
+        float[] out = new float[1];
+        Location.distanceBetween(loc.getLatitude(), loc.getLongitude(), t.lat, t.lon, out);
+        double d = out[0];
+
+        if (d <= TRIGGER_M && saidTurn != nextTurn) {
+            saidTurn = nextTurn;
+            voice.say(String.format(Locale.KOREA, "%.0f미터 앞 %s입니다.", d, t.text), true);
+        }
+        if (d <= PASS_M) {
+            nextTurn++;
+            paintGuideButton();
+        }
+    }
+
+    // 위치를 서버에 보내 경로를 벗어났는지 묻는다. 벗어났으면 새 경로를 받아 바꾼다
+    private void track(final double lat, final double lon) {
+        // 아직 경로 위에 올라서지 않았으면 보내지 않는다.
+        // 보내면 서버가 이탈로 보고 고른 경로를 내 위치 기준으로 바꿔 버린다
+        if (navId == null || tracking || lastPathIndex < 0) return;
+        long now = System.currentTimeMillis();
+        if (now - lastTrackMs < TRACK_EVERY_MS) return;
+        lastTrackMs = now;
+        tracking = true;
+
+        final String host = serverAddress();
+        final String id = navId;
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String url = String.format(Locale.US,
+                            "http://%s/track?id=%s&lat=%f&lon=%f", host, id, lat, lon);
+                    final JSONObject res = new JSONObject(httpGet(url));
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            onTrack(res);
+                        }
+                    });
+                } catch (Exception e) {
+                    Log.w(TAG, "위치 보고 실패: " + e.getMessage());
+                } finally {
+                    tracking = false;
+                }
+            }
+        });
+    }
+
+    private void onTrack(JSONObject res) {
+        if (!guiding || routes.isEmpty()) return;
+        remainM = res.optDouble("remain_m", remainM);
+
+        if (res.optBoolean("off", false)) {
+            JSONObject nr = res.optJSONObject("route");
+            if (nr == null) {
+                Toast.makeText(this, "경로를 벗어났습니다", Toast.LENGTH_SHORT).show();
+                updateDetail();
+                return;
+            }
+            try {
+                RouteInfo r = routes.get(selected);
+                RouteInfo n = build(r.name, r.color, nr, nr.getDouble("length_m"), false);
+                n.overlay = r.overlay;
+                routes.set(selected, n);
+                navId = res.optString("nav_id", navId);
+                nextTurn = 0;
+                saidTurn = -1;
+                doneSaid = false;
+                lastPathIndex = -1;
+                remainM = n.lengthM;
+                clearNavOverlay();
+                if (n.overlay != null) n.overlay.setCoords(n.pts);
+                if (myLoc != null) { paintRemaining(myLoc); paintTurnBand(myLoc); }
+                voice.say("경로를 벗어나 새 경로로 안내합니다.", true);
+                Toast.makeText(this, "경로를 다시 찾았습니다", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Log.e(TAG, "새 경로 적용 실패", e);
+            }
+        }
+        updateDetail();
+        paintGuideButton();
+    }
+
+    // 하단 패널을 손으로 끌어 올리고 내린다. 지도를 더 보고 싶을 때 내리면 된다
+    private void setupSheetDrag() {
+        if (bottomSheet == null || sheetHandle == null) return;
+
+        sheetMinH = dp(116);
+        sheetMaxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.70);
+
+        // 처음에는 화면의 절반을 넘지 않게 둔다
+        bottomSheet.post(new Runnable() {
+            @Override
+            public void run() {
+                int h = bottomSheet.getHeight();
+                int half = (int) (getResources().getDisplayMetrics().heightPixels * 0.50);
+                setSheetHeight(h > half ? half : h);
+            }
+        });
+
+        sheetHandle.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                int act = e.getActionMasked();
+                if (act == MotionEvent.ACTION_DOWN) {
+                    dragStartY = e.getRawY();
+                    dragStartH = bottomSheet.getHeight();
+                    dragMoved = false;
+                    return true;
+                }
+                if (act == MotionEvent.ACTION_MOVE) {
+                    float moved = dragStartY - e.getRawY();
+                    if (Math.abs(moved) > dp(5)) dragMoved = true;
+                    setSheetHeight(dragStartH + (int) moved);
+                    return true;
+                }
+                if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) {
+                    if (!dragMoved) {
+                        // 끌지 않고 톡 눌렀으면 접었다 펴진다
+                        int mid = (sheetMinH + sheetMaxH) / 2;
+                        setSheetHeight(bottomSheet.getHeight() > mid ? sheetMinH : sheetMaxH);
+                    }
+                    v.performClick();
+                    return true;
+                }
+                return false;
+            }
+        });
+    }
+
+    private void setSheetHeight(int h) {
+        if (bottomSheet == null) return;
+        if (h < sheetMinH) h = sheetMinH;
+        if (h > sheetMaxH) h = sheetMaxH;
+        ViewGroup.LayoutParams lp = bottomSheet.getLayoutParams();
+        lp.height = h;
+        bottomSheet.setLayoutParams(lp);
     }
 }

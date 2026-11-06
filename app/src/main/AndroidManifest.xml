@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- 이 선언이 없으면 안드로이드 11 이상에서 음성이 나오지 않는다 . -->
+    <!-- 이 선언이 없으면 안드로이드 11 이상에서 음성이 나오지 않는다 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
@@ -69,6 +69,13 @@
         <activity
             android:name=".MayActivity"
             android:exported="false" />
+
+        <!-- 내 위치를 출발지로 쓰는 내비게이션 화면. 화면이 꺼지지 않게 한다 -->
+        <activity
+            android:name=".NaviActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- 장소명 검색. 열리면 키보드가 바로 올라오게 한다 -->
         <activity
