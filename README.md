@@ -45,9 +45,9 @@
 |:---:|:---:|:---:|:---:|
 | <img src="https://github.com/user-attachments/assets/655db792-bf00-4fcb-92a2-c8ba5195c5e5" width="200"> | <img src="https://github.com/user-attachments/assets/e765a465-656f-45dc-b6ec-fd13b87ee17e" width="200"> | <img src="https://github.com/user-attachments/assets/4c009279-e68a-4c25-bf19-60fe0da4e1db" width="200"> | <img src="https://github.com/user-attachments/assets/c91436ab-855e-47a6-b69d-470bc6ca4f61" width="200"> |
 
-| 경로 비교 결과 | 시설 표시 | 시작 화면 | 야간 화면 |
-|:---:|:---:|:---:|:---:|
-| <img src="https://github.com/user-attachments/assets/9557488c-0e36-4d40-b66c-0b0aa2815803" width="200"> | <img src="https://github.com/user-attachments/assets/900fbe52-6b57-4f04-b49f-b0aff8f5cfa0" width="200"> | <img src="https://github.com/user-attachments/assets/cc553abd-3c7c-447e-8652-1a79b8ab5f62" width="200"> | <img src="https://github.com/user-attachments/assets/573c03dd-ea11-4ff1-a5c2-e7e70f8a5b7d" width="200"> |
+| 경로 비교 결과 | 시설 표시 | 시작 화면 | 야간 화면 | 내비게이션 화면 | 
+|:---:|:---:|:---:|:---:|:---:|
+| <img src="https://github.com/user-attachments/assets/9557488c-0e36-4d40-b66c-0b0aa2815803" width="200"> | <img src="https://github.com/user-attachments/assets/900fbe52-6b57-4f04-b49f-b0aff8f5cfa0" width="200"> | <img src="https://github.com/user-attachments/assets/cc553abd-3c7c-447e-8652-1a79b8ab5f62" width="200"> | <img src="https://github.com/user-attachments/assets/573c03dd-ea11-4ff1-a5c2-e7e70f8a5b7d" width="200"> | <img src="https://github.com/user-attachments/assets/d11cea24-a858-4049-aaf2-f5963fb2c095" width="200"> |
 
 ### 1. 공공데이터 수집 및 정제
 
@@ -188,14 +188,14 @@ Android Studio에서 프로젝트를 열고 Gradle Sync 후 실행
 
 ## 다음 계획
 
-- 내비게이션 기능 추가 
+- 응급 안내 서비스 구현
 - 
 - 
 - 
 - 
 ---
 ## 회의 내용
-- osm은 각도로 tmap은 응답 결과를 통해 내비게이션 기능 추가
+- 이상함을 탐지할 기준 정하기
 - 
 - 
 - 
