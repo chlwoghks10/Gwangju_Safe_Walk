@@ -161,6 +161,35 @@
                         android:text="—" />
                 </LinearLayout>
 
+                <LinearLayout
+                    android:id="@+id/rowGuardian"
+                    style="@style/MenuRow">
+
+                    <TextView
+                        style="@style/MenuRowText"
+                        android:layout_marginStart="0dp"
+                        android:text="긴급 시 연락할 사람" />
+
+                    <TextView
+                        android:id="@+id/valGuardian"
+                        style="@style/MenuRowValue"
+                        android:text="—" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/rowEmergencyTest"
+                    style="@style/MenuRow">
+
+                    <TextView
+                        style="@style/MenuRowText"
+                        android:layout_marginStart="0dp"
+                        android:text="긴급 기능 시험" />
+
+                    <TextView
+                        style="@style/MenuRowValue"
+                        android:text="눌러서 확인" />
+                </LinearLayout>
+
                 <View style="@style/MenuDivider" />
 
                 <LinearLayout

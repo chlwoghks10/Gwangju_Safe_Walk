@@ -24,6 +24,9 @@ import java.io.InputStreamReader;
 import java.util.Locale;
 
 public class MenuActivity extends AppCompatActivity {
+
+    private Voice testVoice;
+    private Emergency testEmergency;
     private static final String PREF = "safewalk";
     private static final String KEY_SERVER = "server";
     private static final String DEFAULT_SERVER = "13.209.99.73:8000";
@@ -46,6 +49,26 @@ public class MenuActivity extends AppCompatActivity {
                 askServer();
             }
         });
+
+        findViewById(R.id.rowGuardian).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Guardians.edit(MenuActivity.this, new Runnable() {
+                    @Override
+                    public void run() {
+                        showGuardian();
+
+        findViewById(R.id.rowEmergencyTest).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                runEmergencyTest();
+            }
+        });
+                    }
+                });
+            }
+        });
+        showGuardian();
 
         bindDialogRow(R.id.rowTheme, "화면 색",
                 "해가 지면 어두운 색으로, 해가 뜨면 밝은 색으로 저절로 바뀝니다.\n\n"
@@ -84,6 +107,36 @@ public class MenuActivity extends AppCompatActivity {
         Tabs.attach(this, Tabs.MORE);
         showServer();
         showTheme();
+    }
+
+    // 팀장 모듈 없이 긴급 흐름만 돌려 본다. 가짜 판정 하나를 만들어 넘긴다
+    private void runEmergencyTest() {
+        if (Guardians.load(this).isEmpty()) {
+            dialog("긴급 기능 시험", "먼저 위의 '긴급 시 연락할 사람'에 번호를 등록해 주세요.");
+            return;
+        }
+        if (testVoice == null) {
+            testVoice = new Voice(this, new Voice.Listener() {
+                @Override
+                public void onVoiceState(boolean ready, String message) { }
+            });
+        }
+        if (testEmergency == null) testEmergency = new Emergency(this, testVoice);
+        testEmergency.test(MainActivity.CHOSUN.latitude, MainActivity.CHOSUN.longitude);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (testEmergency != null) testEmergency.shutdown();
+        if (testVoice != null) testVoice.shutdown();
+        super.onDestroy();
+    }
+
+    private void showGuardian() {
+        TextView t = findViewById(R.id.valGuardian);
+        if (t == null) return;
+        t.setText(Guardians.summary(this)
+                + (Guardians.isTestMode(this) ? " (시험 모드)" : ""));
     }
 
     private void showServer() {

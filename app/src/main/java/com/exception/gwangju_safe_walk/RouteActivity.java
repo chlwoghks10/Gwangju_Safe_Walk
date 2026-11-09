@@ -1,9 +1,12 @@
 package com.exception.gwangju_safe_walk;
 
+import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.PointF;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -11,6 +14,7 @@ import android.location.Location;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -25,8 +29,16 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentManager;
 
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
 import com.naver.maps.geometry.LatLng;
 import com.naver.maps.geometry.LatLngBounds;
 import com.naver.maps.map.CameraPosition;
@@ -118,14 +130,27 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private Voice voice;
 
+    // 이상 상황 처리. 팀장 모듈이 onAnomaly() 만 불러 주면 된다
+    private Emergency emergency;
+
     // 안내 지점 몇 m 앞에서 읽어 줄지
     private static final double TRIGGER_M = 30;
 
     // 이보다 가까워지면 그 지점을 지난 것으로 보고 다음으로 넘긴다
     private static final double PASS_M = 12;
 
-    // 걷는 동안 서버에 위치를 보내는 간격
-    private static final long TRACK_EVERY_MS = 5000;
+    // 안내 중 위치를 받는 간격 (1~2초)
+    private static final long GUIDE_INTERVAL_MS     = 2000;
+    private static final long GUIDE_MIN_INTERVAL_MS = 1000;
+
+    // 오차 반경이 이보다 큰 측정은 이탈 판정에서 뺀다
+    private static final double MAX_ACCURACY_M = 30;
+
+    // 재탐색에 실패했을 때, 성공한 직후에 다시 판정을 쉬는 시간
+    private static final long RETRY_DELAY_MS    = 8000;
+    private static final long COOLDOWN_MS       = 5000;
+
+    private static final int REQ_GUIDE_LOCATION = 3000;
 
     // 경로에서 이보다 멀면 지나온 길을 지우지 않는다
     private static final double ON_ROUTE_M = 60;
@@ -140,8 +165,15 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     private int nextTurn = 0;
     private int saidTurn = -1;
     private String navId = null;
-    private long lastTrackMs = 0;
-    private boolean tracking = false;
+
+    // 경로 이탈 재탐색
+    private final OffRouteDetector offRoute = new OffRouteDetector();
+    private FusedLocationProviderClient guideFused;
+    private LocationCallback guideCallback;
+    private boolean rerouting = false;
+    private boolean armed = false;           // 경로 위에 한 번이라도 올라섰는지
+    private int guideToken = 0;              // 안내가 끝난 뒤 늦게 온 응답을 버리기 위한 번호
+    private long rerouteBlockedUntil = 0;
     private PathOverlay navOverlay;
     private double remainM = -1;
     private Location myLoc;
@@ -406,14 +438,8 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private void onLocationChanged(@NonNull Location loc) {
         myLoc = loc;
-
-        // 안내 중일 때만 지나온 길을 지우고 위치를 서버에 보고한다
-        if (guiding) {
-            paintRemaining(loc);
-            checkGuide(loc);
-            paintTurnBand(loc);
-            track(loc.getLatitude(), loc.getLongitude());
-        }
+        // 안내 중의 처리(지나온 길 지우기, 회전 안내, 이탈 판정)는
+        // 1~2초 간격으로 받는 onGuideLocation() 에서 한다
 
         // 버튼을 누른 직후 한 번만 쓴다. 계속 덮어쓰면 출발지가 따라 움직인다
         if (wantMyLocation == WANT_NONE) return;
@@ -434,6 +460,15 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
                                            @NonNull int[] grantResults) {
+        if (requestCode == REQ_GUIDE_LOCATION) {
+            if (hasLocationPermission()) {
+                if (!routes.isEmpty() && !guiding) startGuide();
+            } else {
+                Toast.makeText(this, "위치 권한이 없어 안내를 시작할 수 없습니다",
+                        Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (locationSource.onRequestPermissionsResult(requestCode, permissions, grantResults)) {
             if (!locationSource.isActivated()) {
                 wantMyLocation = WANT_NONE;
@@ -639,58 +674,8 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private void showResult(JSONObject json) {
         try {
-            JSONObject sh = json.getJSONObject("shortest");
-            JSONObject sa = json.getJSONObject("safest");
-            JSONObject sb = json.optJSONObject("safest2");
-            boolean same  = json.optBoolean("same", false);
-            boolean same2 = json.optBoolean("same2", false);
-
             clearRoutes();
-
-            // 서버가 경로를 도로 위에서 시작하므로 마커도 같이 옮긴다
-            JSONObject snap = json.optJSONObject("snap");
-            if (snap != null) {
-                JSONArray s0 = snap.optJSONArray("start");
-                JSONArray e0 = snap.optJSONArray("end");
-                if (s0 != null && s0.length() == 2 && startMarker != null) {
-                    startMarker.setPosition(new LatLng(s0.getDouble(0), s0.getDouble(1)));
-                }
-                if (e0 != null && e0.length() == 2 && endMarker != null) {
-                    endMarker.setPosition(new LatLng(e0.getDouble(0), e0.getDouble(1)));
-                }
-                double off = Math.max(snap.optDouble("start_off_m", 0),
-                                      snap.optDouble("end_off_m", 0));
-                if (off >= 40) {
-                    Toast.makeText(this,
-                            String.format("도로에서 %.0fm 떨어진 지점이라 가까운 길 위에서 안내합니다", off),
-                            Toast.LENGTH_SHORT).show();
-                }
-            }
-
-            double shortestM = sh.getDouble("length_m");
-
-            routes.add(build("최단",   COLOR_SHORT, sh, shortestM, false));
-            routes.add(build("안심 A", COLOR_SAFE,  sa, shortestM, same));
-            if (sb != null) routes.add(build("안심 B", COLOR_SAFE2, sb, shortestM, same2));
-
-            // 세 개를 모두 깔아 두고, 고른 것만 굵게 칠한다
-            for (int i = 0; i < routes.size(); i++) {
-                final int idx = i;
-                RouteInfo r = routes.get(i);
-                if (r.pts.size() < 2) continue;
-                PathOverlay p = new PathOverlay();
-                p.setCoords(r.pts);
-                p.setOutlineWidth(0);
-                p.setMap(naverMap);
-                p.setOnClickListener(new Overlay.OnClickListener() {
-                    @Override
-                    public boolean onClick(Overlay o) {
-                        select(idx);
-                        return true;
-                    }
-                });
-                r.overlay = p;
-            }
+            populateRoutes(json, true);
 
             buildTabs();
             select(0);
@@ -703,6 +688,61 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         } catch (Exception e) {
             Log.e(TAG, "응답 해석 실패", e);
             Toast.makeText(this, "응답을 읽지 못했습니다", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // 응답으로 routes 와 지도 위의 선을 채운다.
+    // 기존 경로를 지우지 않으므로 부르기 전에 비워 둘 것
+    private void populateRoutes(JSONObject json, boolean warnSnap) throws Exception {
+        JSONObject sh = json.getJSONObject("shortest");
+        JSONObject sa = json.getJSONObject("safest");
+        JSONObject sb = json.optJSONObject("safest2");
+        boolean same  = json.optBoolean("same", false);
+        boolean same2 = json.optBoolean("same2", false);
+
+        // 서버가 경로를 도로 위에서 시작하므로 마커도 같이 옮긴다
+        JSONObject snap = json.optJSONObject("snap");
+        if (snap != null) {
+            JSONArray s0 = snap.optJSONArray("start");
+            JSONArray e0 = snap.optJSONArray("end");
+            if (s0 != null && s0.length() == 2 && startMarker != null) {
+                startMarker.setPosition(new LatLng(s0.getDouble(0), s0.getDouble(1)));
+            }
+            if (e0 != null && e0.length() == 2 && endMarker != null) {
+                endMarker.setPosition(new LatLng(e0.getDouble(0), e0.getDouble(1)));
+            }
+            double off = Math.max(snap.optDouble("start_off_m", 0),
+                                  snap.optDouble("end_off_m", 0));
+            if (warnSnap && off >= 40) {
+                Toast.makeText(this,
+                        String.format("도로에서 %.0fm 떨어진 지점이라 가까운 길 위에서 안내합니다", off),
+                        Toast.LENGTH_SHORT).show();
+            }
+        }
+
+        double shortestM = sh.getDouble("length_m");
+
+        routes.add(build("최단",   COLOR_SHORT, sh, shortestM, false));
+        routes.add(build("안심 A", COLOR_SAFE,  sa, shortestM, same));
+        if (sb != null) routes.add(build("안심 B", COLOR_SAFE2, sb, shortestM, same2));
+
+        // 세 개를 모두 깔아 두고, 고른 것만 굵게 칠한다
+        for (int i = 0; i < routes.size(); i++) {
+            final int idx = i;
+            RouteInfo r = routes.get(i);
+            if (r.pts.size() < 2) continue;
+            PathOverlay p = new PathOverlay();
+            p.setCoords(r.pts);
+            p.setOutlineWidth(0);
+            p.setMap(naverMap);
+            p.setOnClickListener(new Overlay.OnClickListener() {
+                @Override
+                public boolean onClick(Overlay o) {
+                    select(idx);
+                    return true;
+                }
+            });
+            r.overlay = p;
         }
     }
 
@@ -943,22 +983,58 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     @Override
     protected void onDestroy() {
         guiding = false;
+        removeGuideUpdates();
+        if (emergency != null) emergency.shutdown();
         io.shutdownNow();
         if (voice != null) voice.shutdown();
         super.onDestroy();
     }
 
+    /**
+     * 팀장 모듈이 이상이라고 판정하면 이것만 부르면 된다.
+     * 확인 창 15초 -> 무응답이면 보호자에게 위치 문자 -> 보호자가 전화를 건다.
+     */
+    public void onAnomaly(Anomaly a) {
+        if (emergency == null) emergency = new Emergency(this, voice);
+        emergency.handle(a);
+    }
+
+    /** 시연용. 팀장 모듈 없이 긴급 흐름만 돌려 본다 */
+    public void testEmergency() {
+        if (emergency == null) emergency = new Emergency(this, voice);
+        if (myLoc == null) {
+            Toast.makeText(this, "현재 위치를 아직 못 받았습니다", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        emergency.test(myLoc.getLatitude(), myLoc.getLongitude());
+    }
+
     private void startGuide() {
+        if (!hasLocationPermission()) {
+            ActivityCompat.requestPermissions(this, new String[]{
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_GUIDE_LOCATION);
+            return;
+        }
         final RouteInfo r = routes.get(selected);
 
-        // 경로 출발점에서 멀리 떨어진 채로 켜면 경로 이탈로 잡혀 엉뚱하게 동작한다
+        // 위치를 못 받으면 안내가 켜져도 아무 일이 일어나지 않는다. 먼저 알린다
+        if (myLoc == null) {
+            Toast.makeText(this, "현재 위치를 받지 못했습니다. 위치(GPS)를 켜고 다시 눌러 주세요",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        // 걸어서 가는 앱이라 안내는 내 위치에서만 시작한다
         double away = distanceToStart(r);
         if (away > START_NEAR_M) {
             new AlertDialog.Builder(this)
-                    .setTitle("출발지에서 떨어져 있습니다")
+                    .setTitle("안내는 내 위치에서 시작합니다")
                     .setMessage(String.format(Locale.KOREA,
-                            "현재 위치가 경로 출발점에서 %,.0f m 떨어져 있습니다.\n\n"
-                            + "안내는 출발점에서 시작해야 남은 거리와 음성이 맞습니다.", away))
+                            "현재 위치가 이 경로의 출발점에서 %,.0f m 떨어져 있습니다.\n\n"
+                            + "걸어서 가는 길이라 지금 있는 자리에서만 안내할 수 있습니다.\n"
+                            + "내 위치를 출발지로 경로를 다시 찾을까요?\n\n"
+                            + "경로를 비교해 보기만 하려면 취소를 누르세요.", away))
                     .setPositiveButton("내 위치에서 다시 찾기",
                             new DialogInterface.OnClickListener() {
                                 @Override
@@ -966,12 +1042,6 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                                     useMyLocationAsStart();
                                 }
                             })
-                    .setNeutralButton("그래도 시작", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface d, int w) {
-                            beginGuide(r);
-                        }
-                    })
                     .setNegativeButton("취소", null)
                     .show();
             return;
@@ -1006,7 +1076,13 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         lastPathIndex = -1;
         navId = r.navId;
         remainM = r.lengthM;
-        lastTrackMs = 0;
+
+        offRoute.reset();
+        armed = false;
+        rerouting = false;
+        rerouteBlockedUntil = 0;
+        guideToken++;
+        startGuideUpdates();
 
         // 실제 내비처럼 화면을 기울이고, 진행 방향이 위로 오게 돌린다
         if (naverMap != null) {
@@ -1034,6 +1110,11 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private void stopGuide() {
         guiding = false;
+        rerouting = false;
+        armed = false;
+        guideToken++;
+        offRoute.reset();
+        removeGuideUpdates();
         nextTurn = 0;
         saidTurn = -1;
         doneSaid = false;
@@ -1175,73 +1256,261 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         }
     }
 
-    // 위치를 서버에 보내 경로를 벗어났는지 묻는다. 벗어났으면 새 경로를 받아 바꾼다
-    private void track(final double lat, final double lon) {
-        // 아직 경로 위에 올라서지 않았으면 보내지 않는다.
-        // 보내면 서버가 이탈로 보고 고른 경로를 내 위치 기준으로 바꿔 버린다
-        if (navId == null || tracking || lastPathIndex < 0) return;
-        long now = System.currentTimeMillis();
-        if (now - lastTrackMs < TRACK_EVERY_MS) return;
-        lastTrackMs = now;
-        tracking = true;
+    // ---------------------------------------------------------------
+    // 경로 이탈 재탐색
+    //  - 안내 중 1~2초마다 위치를 받는다
+    //  - 현재 위치와 경로 사이의 최단 거리가 30m 이상인 측정이 2번 연속이면 이탈
+    //  - 현재 위치를 출발지로 같은 도착지까지 새 경로를 받아 지도를 갱신한다
+    // ---------------------------------------------------------------
 
+    private boolean hasLocationPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @SuppressLint("MissingPermission")
+    private void startGuideUpdates() {
+        removeGuideUpdates();
+        if (guideFused == null) guideFused = LocationServices.getFusedLocationProviderClient(this);
+
+        guideCallback = new LocationCallback() {
+            @Override
+            public void onLocationResult(@NonNull LocationResult result) {
+                Location loc = result.getLastLocation();
+                if (loc != null) onGuideLocation(loc);
+            }
+        };
+        LocationRequest req = new LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY, GUIDE_INTERVAL_MS)
+                .setMinUpdateIntervalMillis(GUIDE_MIN_INTERVAL_MS)
+                .build();
+        guideFused.requestLocationUpdates(req, guideCallback, Looper.getMainLooper());
+    }
+
+    private void removeGuideUpdates() {
+        if (guideFused != null && guideCallback != null) {
+            guideFused.removeLocationUpdates(guideCallback);
+        }
+        guideCallback = null;
+    }
+
+    // 안내 중 1~2초마다 불린다
+    private void onGuideLocation(@NonNull Location loc) {
+        if (!guiding || routes.isEmpty()) return;
+        myLoc = loc;
+
+        paintRemaining(loc);
+        checkGuide(loc);
+        paintTurnBand(loc);
+
+        RouteInfo r = routes.get(selected);
+        double d = RouteGeometry.distanceToPolylineM(
+                loc.getLatitude(), loc.getLongitude(), r.pts);
+        if (Double.isNaN(d)) return;
+
+        // 경로 위에 있을 때만 남은 거리를 갱신한다
+        if (d <= ON_ROUTE_M) {
+            remainM = RouteGeometry.remainingAlongM(
+                    loc.getLatitude(), loc.getLongitude(), r.pts);
+            txtRouteTime.setText(
+                    Math.max(1, (int) Math.round(remainM / WALK_M_PER_MIN)) + "분");
+            txtRouteMeta.setText(String.format(Locale.KOREA, "남은 거리 %,.0f m", remainM));
+            paintArrive(remainM, true);
+        }
+
+        detectOffRoute(loc, d);
+    }
+
+    private void detectOffRoute(Location loc, double d) {
+        if (rerouting || endPoint == null) return;
+        if (SystemClock.elapsedRealtime() < rerouteBlockedUntil) return;
+
+        // 오차가 큰 측정은 믿을 수 없으니 세지도, 되돌리지도 않는다
+        if (loc.hasAccuracy() && loc.getAccuracy() > MAX_ACCURACY_M) return;
+
+        // 도착지 바로 근처에서는 다시 찾지 않는다
+        float[] out = new float[1];
+        Location.distanceBetween(loc.getLatitude(), loc.getLongitude(),
+                endPoint.latitude, endPoint.longitude, out);
+        if (out[0] <= OffRouteDetector.THRESHOLD_M) return;
+
+        // 아직 경로 위에 올라서지 않았으면(출발점으로 가는 중) 이탈로 보지 않는다
+        if (d < OffRouteDetector.THRESHOLD_M) armed = true;
+        if (!armed) return;
+
+        if (offRoute.onSample(d)) {
+            offRoute.reset();
+            reroute(new LatLng(loc.getLatitude(), loc.getLongitude()));
+        }
+    }
+
+    // 현재 위치를 출발지로 같은 도착지까지 경로를 다시 받는다
+    private void reroute(final LatLng from) {
+        rerouting = true;
+        final int token = guideToken;
+        final int keepIndex = selected;
+        final LatLng to = endPoint;
         final String host = serverAddress();
         final String id = navId;
+
+        voice.say("경로를 이탈했습니다. 경로를 다시 찾습니다.", true);
+
         io.execute(new Runnable() {
             @Override
             public void run() {
+                // 이탈 판정은 앱이 이미 했으므로 서버에는 force 로 경로만 다시 만들어 달라고 한다.
+                // nav_id 가 없는 예전 서버면 /route 로 세 개를 받는다
+                String url = (id == null)
+                        ? String.format(Locale.US,
+                            "http://%s/route?start_lat=%f&start_lon=%f&end_lat=%f&end_lon=%f",
+                            host, from.latitude, from.longitude, to.latitude, to.longitude)
+                        : String.format(Locale.US,
+                            "http://%s/track?id=%s&lat=%f&lon=%f&force=1",
+                            host, id, from.latitude, from.longitude);
                 try {
-                    String url = String.format(Locale.US,
-                            "http://%s/track?id=%s&lat=%f&lon=%f", host, id, lat, lon);
-                    final JSONObject res = new JSONObject(httpGet(url));
+                    final JSONObject json = new JSONObject(httpGet(url));
                     ui.post(new Runnable() {
                         @Override
                         public void run() {
-                            onTrack(res);
+                            // 그 사이 안내가 끝났거나 다시 시작됐으면 버린다
+                            if (!guiding || token != guideToken) return;
+                            rerouting = false;
+                            if (id == null) applyReroute(from, json, keepIndex);
+                            else            applyOneRoute(from, json);
                         }
                     });
                 } catch (Exception e) {
-                    Log.w(TAG, "위치 보고 실패: " + e.getMessage());
-                } finally {
-                    tracking = false;
+                    Log.e(TAG, "재탐색 실패: " + e.getMessage(), e);
+                    final String msg = e.getMessage() == null ? "" : e.getMessage();
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!guiding || token != guideToken) return;
+                            rerouting = false;
+                            onRerouteFailed(msg);
+                        }
+                    });
                 }
             }
         });
     }
 
-    private void onTrack(JSONObject res) {
-        if (!guiding || routes.isEmpty()) return;
-        remainM = res.optDouble("remain_m", remainM);
-
-        if (res.optBoolean("off", false)) {
+    // /track 응답으로 보고 있던 경로 하나만 갈아 끼운다. 나머지 탭은 그대로 둔다
+    private void applyOneRoute(LatLng from, JSONObject res) {
+        try {
             JSONObject nr = res.optJSONObject("route");
-            if (nr == null) {
-                Toast.makeText(this, "경로를 벗어났습니다", Toast.LENGTH_SHORT).show();
-                updateDetail();
-                return;
+            if (nr == null) throw new Exception("빈 응답");
+
+            RouteInfo old = routes.get(selected);
+            RouteInfo n = build(old.name, old.color, nr, nr.getDouble("length_m"), false);
+            n.overlay = old.overlay;
+            routes.set(selected, n);
+            if (n.overlay != null) n.overlay.setCoords(n.pts);
+
+            startPoint = from;
+            editStart.setText("내 위치");
+            if (startMarker != null) startMarker.setPosition(from);
+
+            nextTurn = 0;
+            saidTurn = -1;
+            doneSaid = false;
+            lastPathIndex = -1;
+            navId = n.navId;
+            remainM = n.lengthM;
+            clearNavOverlay();
+
+            updateDetail();
+            paintGuideButton();
+            if (myLoc != null) {
+                paintRemaining(myLoc);
+                paintTurnBand(myLoc);
             }
-            try {
-                RouteInfo r = routes.get(selected);
-                RouteInfo n = build(r.name, r.color, nr, nr.getDouble("length_m"), false);
-                n.overlay = r.overlay;
-                routes.set(selected, n);
-                navId = res.optString("nav_id", navId);
-                nextTurn = 0;
-                saidTurn = -1;
-                doneSaid = false;
-                lastPathIndex = -1;
-                remainM = n.lengthM;
-                clearNavOverlay();
-                if (n.overlay != null) n.overlay.setCoords(n.pts);
-                if (myLoc != null) { paintRemaining(myLoc); paintTurnBand(myLoc); }
-                voice.say("경로를 벗어나 새 경로로 안내합니다.", true);
-                Toast.makeText(this, "경로를 다시 찾았습니다", Toast.LENGTH_SHORT).show();
-            } catch (Exception e) {
-                Log.e(TAG, "새 경로 적용 실패", e);
-            }
+
+            // 새 경로에 올라설 때까지는 또 이탈로 보지 않는다
+            offRoute.reset();
+            double d = RouteGeometry.distanceToPolylineM(from.latitude, from.longitude, n.pts);
+            armed = d < OffRouteDetector.THRESHOLD_M;
+            rerouteBlockedUntil = SystemClock.elapsedRealtime() + COOLDOWN_MS;
+
+            voice.say("새 경로로 안내합니다. 남은 거리 " + Voice.distanceText(n.lengthM)
+                    + ", 도보 " + n.minutes() + "분입니다.");
+            Toast.makeText(this, "경로를 다시 찾았습니다", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.e(TAG, "새 경로 적용 실패", e);
+            onRerouteFailed("");
         }
-        updateDetail();
-        paintGuideButton();
+    }
+
+    // 안내를 멈추지 않고 경로 전체를 새 응답으로 바꾼다.
+    // (showResult 는 clearRoutes 로 안내를 끝내 버리므로 쓰지 않는다)
+    private void applyReroute(LatLng from, JSONObject json, int keepIndex) {
+        try {
+            for (RouteInfo r : routes) {
+                if (r.overlay != null) r.overlay.setMap(null);
+            }
+            routes.clear();
+            if (navOverlay != null) {
+                navOverlay.setMap(null);
+                navOverlay = null;
+            }
+
+            startPoint = from;
+            editStart.setText("내 위치");
+            if (startMarker != null) startMarker.setPosition(from);
+
+            populateRoutes(json, false);
+            if (routes.isEmpty()) throw new Exception("빈 응답");
+
+            // 보던 경로 종류(최단/안심 A/안심 B)를 그대로 유지한다
+            selected = Math.min(keepIndex, routes.size() - 1);
+            RouteInfo r = routes.get(selected);
+
+            nextTurn = 0;
+            saidTurn = -1;
+            doneSaid = false;
+            lastPathIndex = -1;
+            navId = r.navId;
+            remainM = r.lengthM;
+
+            buildTabs();
+            select(selected);
+            if (myLoc != null) {
+                paintRemaining(myLoc);
+                paintTurnBand(myLoc);
+            }
+            paintGuideButton();
+
+            // 새 경로의 출발점이 도로에 맞춰져 30m 넘게 떨어져 있으면,
+            // 경로에 올라설 때까지는 또 이탈로 보지 않는다 (재탐색이 반복되는 것을 막는다)
+            offRoute.reset();
+            double d = RouteGeometry.distanceToPolylineM(
+                    from.latitude, from.longitude, r.pts);
+            armed = d < OffRouteDetector.THRESHOLD_M;
+            rerouteBlockedUntil = SystemClock.elapsedRealtime() + COOLDOWN_MS;
+
+            voice.say("새 경로로 안내합니다. 남은 거리 " + Voice.distanceText(r.lengthM)
+                    + ", 도보 " + r.minutes() + "분입니다.");
+            Toast.makeText(this, "경로를 다시 찾았습니다", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.e(TAG, "새 경로 적용 실패", e);
+            onRerouteFailed("");
+        }
+    }
+
+    private void onRerouteFailed(String msg) {
+        // 서버가 "너무 가깝습니다" 라고 하면 도착지 바로 앞이다
+        if (msg.contains("가깝습니다")) {
+            voice.say("목적지 부근입니다. 안내를 종료합니다.", true);
+            stopGuide();
+            return;
+        }
+        offRoute.reset();
+        rerouteBlockedUntil = SystemClock.elapsedRealtime() + RETRY_DELAY_MS;
+        voice.say("경로를 다시 찾지 못했습니다.", true);
+        Toast.makeText(this, "경로를 다시 찾지 못했습니다. 잠시 후 다시 시도합니다",
+                Toast.LENGTH_SHORT).show();
     }
 
     // 하단 패널을 손으로 끌어 올리고 내린다. 지도를 더 보고 싶을 때 내리면 된다
