@@ -40,6 +40,12 @@ public class Emergency {
     // 같은 보호자에게 문자를 다시 보내기까지 최소 간격
     private static final long SMS_GAP_MS = 2 * 60 * 1000L;
 
+    /** 사용자가 "괜찮아요" 를 눌렀을 때 서버에도 알리기 위한 통로 */
+    public interface Listener {
+        void onUserOk();
+    }
+
+    private Listener listener;
     private final Activity act;
     private final Voice voice;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -58,19 +64,37 @@ public class Emergency {
         this.voice = voice;
     }
 
-    /** 팀장 모듈이 이상이라고 판정하면 이것만 부르면 된다 */
-    public void handle(Anomaly a) {
-        if (a == null) return;
-        if (running) return;                                   // 이미 처리 중
-        if (SystemClock.elapsedRealtime() < blockedUntil) return;  // 방금 취소함
+    public void setListener(Listener l) {
+        this.listener = l;
+    }
+
+    /**
+     * 서버가 이상이라고 알려 오면 부른다.
+     * 창을 띄우지 않기로 했으면 false 를 돌려주니, 부른 쪽이 서버도 초기화해야 한다.
+     */
+    public boolean handle(Anomaly a) {
+        if (a == null) return false;
+        if (running) return false;                                   // 이미 처리 중
+        if (SystemClock.elapsedRealtime() < blockedUntil) return false;  // 방금 취소함
         if (Guardians.load(act).isEmpty()) {
             Toast.makeText(act, "보호자가 등록되지 않아 알릴 수 없습니다", Toast.LENGTH_LONG).show();
-            return;
+            return false;
         }
         current = a;
         alerted = false;
         running = true;
         askUser();
+        return true;
+    }
+
+    /** 서버가 보호자 알림 단계라고 알려 왔을 때. 앱 타이머보다 이쪽이 먼저일 수 있다 */
+    public void alertNow() {
+        if (alerted || current == null) return;
+        stopTicker();
+        closeDialog();
+        alert();
+        running = false;
+        blockedUntil = SystemClock.elapsedRealtime() + COOLDOWN_MS;
     }
 
     public void shutdown() {
@@ -86,7 +110,7 @@ public class Emergency {
 
         dialog = new AlertDialog.Builder(act)
                 .setTitle("괜찮으세요?")
-                .setMessage(body(COUNTDOWN_SEC))
+                .setMessage(body(current.waitSec > 0 ? current.waitSec : COUNTDOWN_SEC))
                 .setCancelable(false)
                 .setPositiveButton("괜찮아요", new DialogInterface.OnClickListener() {
                     @Override
@@ -102,7 +126,7 @@ public class Emergency {
                 })
                 .show();
 
-        left = COUNTDOWN_SEC;
+        left = current.waitSec > 0 ? current.waitSec : COUNTDOWN_SEC;
         ticker = new Runnable() {
             @Override
             public void run() {
@@ -132,10 +156,11 @@ public class Emergency {
         closeDialog();
         running = false;
         blockedUntil = SystemClock.elapsedRealtime() + COOLDOWN_MS;
+        if (listener != null) listener.onUserOk();
         say("알겠습니다. 안내를 계속합니다.");
         // 이미 보호자에게 알렸으면 괜찮다는 것도 알려야 한다
         if (alerted) {
-            sendToAll("[광주 안심길] 상황이 해제되었습니다. 괜찮습니다.");
+            sendToAll("[광주 안심길] 상황이 해제되었습니다. 괜찮습니다.", false);
             Toast.makeText(act, "보호자에게 해제 문자를 보냈습니다", Toast.LENGTH_SHORT).show();
         }
     }
@@ -178,7 +203,7 @@ public class Emergency {
 
     private void alert() {
         boostRinger();
-        sendToAll(message());
+        sendToAll(message(), alerted);
         alerted = true;
         say("보호자에게 위치를 보냈습니다.");
     }
@@ -199,18 +224,23 @@ public class Emergency {
                 "https://map.naver.com/v5/?c=%.5f,%.5f,17,0,0,0,dh", lon, lat);
     }
 
-    private void sendToAll(String text) {
+    /** repeat 이면 2분 간격 제한을 받는다. 첫 알림과 해제 문자는 항상 보낸다 */
+    private void sendToAll(final String text, boolean repeat) {
         List<Guardians.Person> g = Guardians.load(act);
-        if (g.isEmpty()) return;
+        if (g.isEmpty()) {
+            Toast.makeText(act, "보호자가 없어 문자를 못 보냈습니다", Toast.LENGTH_LONG).show();
+            return;
+        }
 
         long now = System.currentTimeMillis();
-        if (now - lastSmsMs < SMS_GAP_MS && alerted) return;   // 문자 폭탄 방지
+        if (repeat && now - lastSmsMs < SMS_GAP_MS) return;   // 문자 폭탄 방지
         lastSmsMs = now;
 
         if (Guardians.isTestMode(act)) {
             new AlertDialog.Builder(act)
                     .setTitle("시험 모드 — 보내지 않았습니다")
-                    .setMessage("받는 사람 " + g.size() + "명\n\n" + text)
+                    .setMessage("실제로 보내려면 더보기 > 긴급 시 연락할 사람 에서 "
+                            + "시험 모드를 꺼 주세요.\n\n받는 사람 " + g.size() + "명\n\n" + text)
                     .setPositiveButton("확인", null)
                     .show();
             return;
@@ -218,25 +248,48 @@ public class Emergency {
 
         if (ContextCompat.checkSelfPermission(act, Manifest.permission.SEND_SMS)
                 != PackageManager.PERMISSION_GRANTED) {
-            openSmsApp(g.get(0).phone, text);   // 권한이 없으면 문자 앱을 열어 준다
+            // 권한이 없으면 문자 앱을 열어 준다. 보내기만 누르면 된다
+            Toast.makeText(act, "문자 권한이 없어 문자 앱을 엽니다", Toast.LENGTH_LONG).show();
+            openSmsApp(g.get(0).phone, text);
             return;
         }
 
         SmsManager sms = smsManager();
         if (sms == null) {
+            Toast.makeText(act, "문자 기능을 쓸 수 없어 문자 앱을 엽니다", Toast.LENGTH_LONG).show();
             openSmsApp(g.get(0).phone, text);
             return;
         }
+
+        int ok = 0;
+        String err = null;
         for (int i = 0; i < g.size(); i++) {
             try {
                 sms.sendMultipartTextMessage(g.get(i).phone, null,
                         sms.divideMessage(text), null, null);
+                ok++;
             } catch (Exception e) {
+                err = e.getMessage();
                 Log.e(TAG, "문자 실패: " + g.get(i).phone, e);
             }
         }
-        Toast.makeText(act, "보호자 " + g.size() + "명에게 문자를 보냈습니다",
-                Toast.LENGTH_SHORT).show();
+        if (ok > 0) {
+            Toast.makeText(act, "보호자 " + ok + "명에게 문자를 보냈습니다",
+                    Toast.LENGTH_SHORT).show();
+        } else {
+            // 조용히 실패하면 원인을 알 수 없다. 화면에 띄우고 문자 앱으로 넘긴다
+            new AlertDialog.Builder(act)
+                    .setTitle("문자를 보내지 못했습니다")
+                    .setMessage((err == null ? "" : err + "\n\n") + "문자 앱으로 보내시겠습니까?")
+                    .setPositiveButton("문자 앱 열기", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int w) {
+                            openSmsApp(Guardians.load(act).get(0).phone, text);
+                        }
+                    })
+                    .setNegativeButton("닫기", null)
+                    .show();
+        }
     }
 
     private SmsManager smsManager() {
@@ -327,7 +380,7 @@ public class Emergency {
         }
     }
 
-    /** 시연용. 팀장 모듈 없이 흐름을 돌려 본다 */
+    /** 시연용. 서버 판정 없이 흐름만 돌려 본다 */
     public void test(double lat, double lon) {
         handle(new Anomaly("정지", "5분째 같은 자리에 머물러 있습니다",
                 Anomaly.LEVEL_ALERT, lat, lon));

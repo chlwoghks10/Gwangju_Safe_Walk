@@ -12,6 +12,7 @@ public class Anomaly {
     public int level;
     public double lat, lon;
     public long atMs;
+    public int waitSec = 15;   // 확인 창을 몇 초 띄울지. 서버가 알려 준다
 
     public Anomaly(String kind, String reason, int level, double lat, double lon) {
         this.kind = kind;

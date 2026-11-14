@@ -133,6 +133,12 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     // 이상 상황 처리. 팀장 모듈이 onAnomaly() 만 불러 주면 된다
     private Emergency emergency;
 
+    // 이상 판정은 서버가 한다. 걷는 동안 5초마다 좌표를 보내고 결과를 받는다
+    private static final long WATCH_EVERY_MS = 5000;
+    private boolean watchOn = false;
+    private boolean watchBusy = false;
+    private long lastWatchMs = 0;
+
     // 안내 지점 몇 m 앞에서 읽어 줄지
     private static final double TRIGGER_M = 30;
 
@@ -328,9 +334,17 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        // 화면이 꺼지면 위치가 안 올라가 서버가 신호 두절로 본다. 미리 멈춘다
+        watchStop();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         Tabs.attach(this, Tabs.ROUTE);
+        if (guiding) watchStart();
     }
 
     @Override
@@ -984,16 +998,139 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     protected void onDestroy() {
         guiding = false;
         removeGuideUpdates();
+        watchStop();
         if (emergency != null) emergency.shutdown();
         io.shutdownNow();
         if (voice != null) voice.shutdown();
         super.onDestroy();
     }
 
-    /**
-     * 팀장 모듈이 이상이라고 판정하면 이것만 부르면 된다.
-     * 확인 창 15초 -> 무응답이면 보호자에게 위치 문자 -> 보호자가 전화를 건다.
-     */
+    // ── 이상 판정 감시 (판정은 서버, 창과 문자는 앱) ──────────────────
+
+    private void watchStart() {
+        if (navId == null) return;
+        final String host = serverAddress();
+        final String id = navId;
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    httpGet(String.format(Locale.US, "http://%s/watch/start?id=%s", host, id));
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() { watchOn = true; }
+                    });
+                } catch (Exception e) {
+                    Log.w(TAG, "감시 시작 실패: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    // 안내를 끄거나 앱이 내려갈 때 반드시 부른다. 안 부르면 서버가 신호 두절로 본다
+    private void watchStop() {
+        if (!watchOn || navId == null) return;
+        watchOn = false;
+        final String host = serverAddress();
+        final String id = navId;
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    httpGet(String.format(Locale.US, "http://%s/watch/stop?id=%s", host, id));
+                } catch (Exception e) {
+                    Log.w(TAG, "감시 중단 실패: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void watchOk() {
+        if (navId == null) return;
+        final String host = serverAddress();
+        final String id = navId;
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    httpGet(String.format(Locale.US, "http://%s/watch/ok?id=%s", host, id));
+                } catch (Exception e) {
+                    Log.w(TAG, "확인 응답 실패: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void watchSend(Location loc) {
+        if (!watchOn || watchBusy || navId == null) return;
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastWatchMs < WATCH_EVERY_MS) return;
+        lastWatchMs = now;
+        watchBusy = true;
+
+        final String host = serverAddress();
+        final String id = navId;
+        final double lat = loc.getLatitude(), lon = loc.getLongitude();
+        final float acc = loc.hasAccuracy() ? loc.getAccuracy() : 0;
+        final long when = loc.getTime();
+
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                String got = null;
+                try {
+                    got = httpGet(String.format(Locale.US,
+                            "http://%s/watch?id=%s&lat=%f&lon=%f&acc=%.0f&t=%d",
+                            host, id, lat, lon, acc, when));
+                } catch (Exception e) {
+                    Log.w(TAG, "감시 전송 실패: " + e.getMessage());
+                }
+                final String body = got;
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        watchBusy = false;
+                        if (body != null) onWatch(body, lat, lon);
+                    }
+                });
+            }
+        });
+    }
+
+    private void onWatch(String body, double lat, double lon) {
+        try {
+            JSONObject o = new JSONObject(body);
+            if (!o.optBoolean("session", true)) {
+                watchOn = false;
+                watchStart();
+                return;
+            }
+            String a = o.optString("action", "NONE");
+            if ("NONE".equals(a)) return;
+
+            if (emergency == null) emergency = new Emergency(this, voice);
+            emergency.setListener(new Emergency.Listener() {
+                @Override
+                public void onUserOk() {
+                    watchOk();
+                }
+            });
+
+            if ("ASK_CONFIRM".equals(a)) {
+                Anomaly an = new Anomaly("정지", o.optString("reason", "이상 상황이 감지되었습니다"),
+                        Anomaly.LEVEL_ALERT, lat, lon);
+                an.waitSec = o.optInt("wait_sec", 60);
+                // 창을 안 띄우기로 했으면 서버도 초기화해야 경보가 따로 날아오지 않는다
+                if (!emergency.handle(an)) watchOk();
+            } else if ("ALERT_GUARDIAN".equals(a)) {
+                emergency.alertNow();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "감시 응답 처리 실패: " + e.getMessage());
+        }
+    }
+
+    /** 서버가 아니라 코드에서 직접 띄우고 싶을 때 쓴다 */
     public void onAnomaly(Anomaly a) {
         if (emergency == null) emergency = new Emergency(this, voice);
         emergency.handle(a);
@@ -1083,6 +1220,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         rerouteBlockedUntil = 0;
         guideToken++;
         startGuideUpdates();
+        watchStart();
 
         // 실제 내비처럼 화면을 기울이고, 진행 방향이 위로 오게 돌린다
         if (naverMap != null) {
@@ -1110,6 +1248,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private void stopGuide() {
         guiding = false;
+        watchStop();
         rerouting = false;
         armed = false;
         guideToken++;
@@ -1304,6 +1443,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         paintRemaining(loc);
         checkGuide(loc);
         paintTurnBand(loc);
+        watchSend(loc);
 
         RouteInfo r = routes.get(selected);
         double d = RouteGeometry.distanceToPolylineM(
