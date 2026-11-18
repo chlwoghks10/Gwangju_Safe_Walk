@@ -74,7 +74,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private static final String PREF = "safewalk";
     private static final String KEY_SERVER = "server";
-    private static final String DEFAULT_SERVER = "13.209.99.73:8000";
+    private static final String DEFAULT_SERVER = "3.34.178.131:8000";
 
     public static final String EXTRA_DEST_NAME = "dest_name";
     public static final String EXTRA_DEST_LAT  = "dest_lat";
@@ -387,7 +387,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     private void askServer() {
         final EditText input = new EditText(this);
         input.setText(serverAddress());
-        input.setHint("예: 13.209.99.73:8000");
+        input.setHint("예: 3.34.178.131:8000");
 
         new AlertDialog.Builder(this)
                 .setTitle("서버 주소")

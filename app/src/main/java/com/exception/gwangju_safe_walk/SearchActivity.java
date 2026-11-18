@@ -44,7 +44,7 @@ public class SearchActivity extends AppCompatActivity {
 
     private static final String PREF = "safewalk";
     private static final String KEY_SERVER = "server";
-    private static final String DEFAULT_SERVER = "13.209.99.73:8000";
+    private static final String DEFAULT_SERVER = "3.34.178.131:8000";
     private static final String KEY_RECENT = "recent_search";
     private static final String SEP = "\u0001";
     private static final int RECENT_MAX = 8;

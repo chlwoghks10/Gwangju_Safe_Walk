@@ -148,7 +148,8 @@
 
                 <LinearLayout
                     android:id="@+id/rowServer"
-                    style="@style/MenuRow">
+                    style="@style/MenuRow"
+                    android:visibility="gone">
 
                     <TextView
                         style="@style/MenuRowText"

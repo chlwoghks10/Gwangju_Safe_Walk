@@ -29,7 +29,7 @@ public class MenuActivity extends AppCompatActivity {
     private Emergency testEmergency;
     private static final String PREF = "safewalk";
     private static final String KEY_SERVER = "server";
-    private static final String DEFAULT_SERVER = "13.209.99.73:8000";
+    private static final String DEFAULT_SERVER = "3.34.178.131:8000";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,6 +57,11 @@ public class MenuActivity extends AppCompatActivity {
                     @Override
                     public void run() {
                         showGuardian();
+                    }
+                });
+            }
+        });
+        showGuardian();
 
         findViewById(R.id.rowEmergencyTest).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -64,11 +69,6 @@ public class MenuActivity extends AppCompatActivity {
                 runEmergencyTest();
             }
         });
-                    }
-                });
-            }
-        });
-        showGuardian();
 
         bindDialogRow(R.id.rowTheme, "화면 색",
                 "해가 지면 어두운 색으로, 해가 뜨면 밝은 색으로 저절로 바뀝니다.\n\n"
@@ -96,6 +96,15 @@ public class MenuActivity extends AppCompatActivity {
         bindDialogRow(R.id.rowTeam, "만든 사람",
                 "익셉션 (Exception)\n조선대학교 정보통신공학과\n\n"
                         + "20233267 윤신혁\n20213148 최재환\n20233202 윤해준");
+
+        // 서버 주소 줄은 숨겨 두었다. 주소가 바뀌면 이 줄을 길게 눌러 고친다
+        findViewById(R.id.rowTeam).setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                askServer();
+                return true;
+            }
+        });
 
         countFacilities();
         Tabs.attach(this, Tabs.MORE);
@@ -160,7 +169,7 @@ public class MenuActivity extends AppCompatActivity {
     private void askServer() {
         final EditText input = new EditText(this);
         input.setText(serverAddress());
-        input.setHint("예: 13.209.99.73:8000");
+        input.setHint("예: 3.34.178.131:8000");
 
         new AlertDialog.Builder(this)
                 .setTitle("서버 주소")
