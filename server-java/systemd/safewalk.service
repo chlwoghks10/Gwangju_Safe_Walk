@@ -1,0 +1,14 @@
+[Unit]
+Description=Gwangju Safe Walk API (경로 비교)
+After=network.target safewalk-tmap.service
+Wants=safewalk-tmap.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+EnvironmentFile=-/home/ubuntu/safewalk.env
+ExecStart=/usr/bin/java -Dstdout.encoding=UTF-8 -cp /home/ubuntu/out:/home/ubuntu/lib/gson-2.11.0.jar Server 8000 /home/ubuntu/data
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

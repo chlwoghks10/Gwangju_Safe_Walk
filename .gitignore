@@ -14,3 +14,18 @@
 .cxx
 local.properties
 /app/build
+
+# 키와 인증서는 저장소에 올리지 않는다
+*.pem
+*.jks
+*.keystore
+*.p12
+safewalk.env
+
+# 서버 빌드 산출물
+server-java/out/
+server-java/lib/*.jar
+
+# 파이썬 프로토타입
+server/__pycache__/
+server/venv/

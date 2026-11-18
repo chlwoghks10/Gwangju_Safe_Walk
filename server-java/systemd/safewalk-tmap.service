@@ -1,0 +1,17 @@
+[Unit]
+Description=Gwangju Safe Walk - Tmap proxy (윤신혁 RouteServer.java, 원본 그대로)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+# Tmap 키는 이 파일에서 읽는다. 소스와 깃허브에 키를 넣지 않기 위해 분리했다.
+#   echo 'TMAP_APP_KEY=발급받은키' > /home/ubuntu/safewalk.env
+#   chmod 600 /home/ubuntu/safewalk.env
+EnvironmentFile=-/home/ubuntu/safewalk.env
+# RouteServer 는 원본대로 127.0.0.1:3000 에만 바인딩한다 (외부 공개 안 됨).
+ExecStart=/usr/bin/java -Dstdout.encoding=UTF-8 -cp /home/ubuntu/out:/home/ubuntu/lib/gson-2.11.0.jar RouteServer
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
