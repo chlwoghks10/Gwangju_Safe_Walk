@@ -1,6 +1,6 @@
 package com.exception.gwangju_safe_walk;
 
-/** 이상 상황 판정 결과. 팀장 모듈이 만들어서 Emergency 로 넘긴다. */
+// 이상 상황 판정 결과. 서버에서 받아 Emergency 로 넘긴다
 public class Anomaly {
 
     // 확인 창만 띄울지, 무응답 시 보호자에게까지 알릴지
@@ -13,6 +13,7 @@ public class Anomaly {
     public double lat, lon;
     public long atMs;
     public int waitSec = 15;   // 확인 창을 몇 초 띄울지. 서버가 알려 준다
+    public String place;       // 좌표를 주소로 바꾼 것. 못 바꾸면 null
 
     public Anomaly(String kind, String reason, int level, double lat, double lon) {
         this.kind = kind;

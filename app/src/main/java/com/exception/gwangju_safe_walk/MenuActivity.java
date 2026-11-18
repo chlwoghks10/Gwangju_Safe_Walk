@@ -109,7 +109,7 @@ public class MenuActivity extends AppCompatActivity {
         showTheme();
     }
 
-    // 팀장 모듈 없이 긴급 흐름만 돌려 본다. 가짜 판정 하나를 만들어 넘긴다
+    // 서버 판정 없이 긴급 흐름만 돌려 본다
     private void runEmergencyTest() {
         if (Guardians.load(this).isEmpty()) {
             dialog("긴급 기능 시험", "먼저 위의 '긴급 시 연락할 사람'에 번호를 등록해 주세요.");

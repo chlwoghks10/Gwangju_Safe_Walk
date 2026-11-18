@@ -10,7 +10,10 @@ import android.content.pm.PackageManager;
 import android.graphics.PointF;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.location.Address;
+import android.location.Geocoder;
 import android.location.Location;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -130,11 +133,12 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private Voice voice;
 
-    // 이상 상황 처리. 팀장 모듈이 onAnomaly() 만 불러 주면 된다
+    // 이상 상황이 왔을 때 창을 띄우고 보호자에게 알리는 쪽
     private Emergency emergency;
 
     // 이상 판정은 서버가 한다. 걷는 동안 5초마다 좌표를 보내고 결과를 받는다
     private static final long WATCH_EVERY_MS = 5000;
+    private static final int REQ_NOTIFY = 3200;
     private boolean watchOn = false;
     private boolean watchBusy = false;
     private long lastWatchMs = 0;
@@ -334,17 +338,9 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
-        // 화면이 꺼지면 위치가 안 올라가 서버가 신호 두절로 본다. 미리 멈춘다
-        watchStop();
-    }
-
-    @Override
     protected void onResume() {
         super.onResume();
         Tabs.attach(this, Tabs.ROUTE);
-        if (guiding) watchStart();
     }
 
     @Override
@@ -452,9 +448,6 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private void onLocationChanged(@NonNull Location loc) {
         myLoc = loc;
-        // 안내 중의 처리(지나온 길 지우기, 회전 안내, 이탈 판정)는
-        // 1~2초 간격으로 받는 onGuideLocation() 에서 한다
-
         // 버튼을 누른 직후 한 번만 쓴다. 계속 덮어쓰면 출발지가 따라 움직인다
         if (wantMyLocation == WANT_NONE) return;
         int target = wantMyLocation;
@@ -705,8 +698,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         }
     }
 
-    // 응답으로 routes 와 지도 위의 선을 채운다.
-    // 기존 경로를 지우지 않으므로 부르기 전에 비워 둘 것
+    // 부르기 전에 routes 를 비워 둘 것. 여기서는 지우지 않는다
     private void populateRoutes(JSONObject json, boolean warnSnap) throws Exception {
         JSONObject sh = json.getJSONObject("shortest");
         JSONObject sa = json.getJSONObject("safest");
@@ -786,8 +778,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         return r;
     }
 
-    // 회전 지점이 경로 좌표열에서 몇 번째인지 미리 구해 둔다.
-    // 지나쳐 버린 지점을 건너뛸 때 쓴다
+    // 회전 지점이 좌표열의 몇 번째인지 미리 구해 둔다. 지나친 지점을 건너뛸 때 쓴다
     private void markTurnIndexes(RouteInfo r) {
         float[] out = new float[1];
         for (Turn t : r.turns) {
@@ -999,13 +990,67 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         guiding = false;
         removeGuideUpdates();
         watchStop();
+        GuideService.stop(this);
         if (emergency != null) emergency.shutdown();
         io.shutdownNow();
         if (voice != null) voice.shutdown();
         super.onDestroy();
     }
 
-    // ── 이상 판정 감시 (판정은 서버, 창과 문자는 앱) ──────────────────
+    // 알림에 띄울 목적지 이름
+    private String destText() {
+        CharSequence s = editEnd == null ? null : editEnd.getText();
+        String v = s == null ? "" : s.toString().trim();
+        return v.isEmpty() ? "목적지" : v;
+    }
+
+    // 안드로이드 13 부터는 알림을 띄우려면 따로 허락을 받아야 한다
+    private void askNotifyPermission() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS")
+                == PackageManager.PERMISSION_GRANTED) return;
+        ActivityCompat.requestPermissions(this,
+                new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_NOTIFY);
+    }
+
+    // 좌표를 주소로 바꿔 둔다. 시간이 걸려 확인 창을 띄운 뒤에 따로 돌린다
+    private void findPlace(final double lat, final double lon) {
+        if (!Geocoder.isPresent()) return;
+        io.execute(new Runnable() {
+            @Override
+            public void run() {
+                String name = null;
+                try {
+                    Geocoder g = new Geocoder(RouteActivity.this, Locale.KOREA);
+                    List<Address> found = g.getFromLocation(lat, lon, 1);
+                    if (found != null && !found.isEmpty()) name = shortAddress(found.get(0));
+                } catch (Exception e) {
+                    Log.w(TAG, "주소 변환 실패: " + e.getMessage());
+                }
+                final String got = name;
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (got != null && emergency != null) emergency.setPlace(got);
+                    }
+                });
+            }
+        });
+    }
+
+    // "대한민국 광주광역시 동구 필문대로 309" 에서 앞의 나라 이름만 떼어 쓴다
+    private static String shortAddress(Address a) {
+        String line = a.getAddressLine(0);
+        if (line != null && !line.trim().isEmpty()) {
+            return line.replace("대한민국", "").trim();
+        }
+        StringBuilder b = new StringBuilder();
+        if (a.getAdminArea() != null) b.append(a.getAdminArea());
+        if (a.getSubLocality() != null) b.append(' ').append(a.getSubLocality());
+        else if (a.getLocality() != null) b.append(' ').append(a.getLocality());
+        if (a.getThoroughfare() != null) b.append(' ').append(a.getThoroughfare());
+        return b.toString().trim();
+    }
 
     private void watchStart() {
         if (navId == null) return;
@@ -1121,7 +1166,11 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
                         Anomaly.LEVEL_ALERT, lat, lon);
                 an.waitSec = o.optInt("wait_sec", 60);
                 // 창을 안 띄우기로 했으면 서버도 초기화해야 경보가 따로 날아오지 않는다
-                if (!emergency.handle(an)) watchOk();
+                if (!emergency.handle(an)) {
+                    watchOk();
+                } else {
+                    findPlace(lat, lon);
+                }
             } else if ("ALERT_GUARDIAN".equals(a)) {
                 emergency.alertNow();
             }
@@ -1130,13 +1179,13 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         }
     }
 
-    /** 서버가 아니라 코드에서 직접 띄우고 싶을 때 쓴다 */
+    // 서버가 아니라 코드에서 직접 띄우고 싶을 때 쓴다
     public void onAnomaly(Anomaly a) {
         if (emergency == null) emergency = new Emergency(this, voice);
         emergency.handle(a);
     }
 
-    /** 시연용. 팀장 모듈 없이 긴급 흐름만 돌려 본다 */
+    // 시연용. 서버 판정 없이 긴급 흐름만 돌려 본다
     public void testEmergency() {
         if (emergency == null) emergency = new Emergency(this, voice);
         if (myLoc == null) {
@@ -1154,6 +1203,8 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             return;
         }
         final RouteInfo r = routes.get(selected);
+
+        askNotifyPermission();
 
         // 위치를 못 받으면 안내가 켜져도 아무 일이 일어나지 않는다. 먼저 알린다
         if (myLoc == null) {
@@ -1221,6 +1272,8 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         guideToken++;
         startGuideUpdates();
         watchStart();
+        // 이게 떠 있어야 화면을 꺼도 위치가 계속 들어온다
+        GuideService.start(this, destText() + " 까지 안내 중");
 
         // 실제 내비처럼 화면을 기울이고, 진행 방향이 위로 오게 돌린다
         if (naverMap != null) {
@@ -1249,6 +1302,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
     private void stopGuide() {
         guiding = false;
         watchStop();
+        GuideService.stop(this);
         rerouting = false;
         armed = false;
         guideToken++;
@@ -1350,8 +1404,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         turnBand.setVisibility(View.VISIBLE);
     }
 
-    // 안내 문구에서 방향을 읽어 아이콘을 고른다.
-    // 최단·안심 A 는 "좌회전"/"우회전", 안심 B 는 "○○에서 좌회전" 처럼 온다
+    // 안내 문구에서 방향을 읽어 아이콘을 고른다
     private static int turnIcon(String text) {
         if (text == null) return R.drawable.ic_turn_straight;
         if (text.contains("유턴")) return R.drawable.ic_turn_uturn;
@@ -1394,13 +1447,6 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             paintGuideButton();
         }
     }
-
-    // ---------------------------------------------------------------
-    // 경로 이탈 재탐색
-    //  - 안내 중 1~2초마다 위치를 받는다
-    //  - 현재 위치와 경로 사이의 최단 거리가 30m 이상인 측정이 2번 연속이면 이탈
-    //  - 현재 위치를 출발지로 같은 도착지까지 새 경로를 받아 지도를 갱신한다
-    // ---------------------------------------------------------------
 
     private boolean hasLocationPermission() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -1500,8 +1546,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         io.execute(new Runnable() {
             @Override
             public void run() {
-                // 이탈 판정은 앱이 이미 했으므로 서버에는 force 로 경로만 다시 만들어 달라고 한다.
-                // nav_id 가 없는 예전 서버면 /route 로 세 개를 받는다
+                // 판정은 앱이 이미 했으니 서버에는 경로만 다시 만들어 달라고 한다
                 String url = (id == null)
                         ? String.format(Locale.US,
                             "http://%s/route?start_lat=%f&start_lon=%f&end_lat=%f&end_lon=%f",
@@ -1583,8 +1628,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         }
     }
 
-    // 안내를 멈추지 않고 경로 전체를 새 응답으로 바꾼다.
-    // (showResult 는 clearRoutes 로 안내를 끝내 버리므로 쓰지 않는다)
+    // 안내를 멈추지 않고 경로 전체를 새 응답으로 바꾼다
     private void applyReroute(LatLng from, JSONObject json, int keepIndex) {
         try {
             for (RouteInfo r : routes) {
@@ -1622,8 +1666,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             }
             paintGuideButton();
 
-            // 새 경로의 출발점이 도로에 맞춰져 30m 넘게 떨어져 있으면,
-            // 경로에 올라설 때까지는 또 이탈로 보지 않는다 (재탐색이 반복되는 것을 막는다)
+            // 새 경로에 올라설 때까지는 또 이탈로 보지 않는다
             offRoute.reset();
             double d = RouteGeometry.distanceToPolylineM(
                     from.latitude, from.longitude, r.pts);

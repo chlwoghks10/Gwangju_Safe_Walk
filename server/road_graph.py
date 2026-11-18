@@ -1,9 +1,4 @@
-"""
-보행 도로망 그래프.
-
-조원이 작성한 RoadGraph.java / Dijkstra.java 를 파이썬으로 옮긴 것으로,
-같은 CSV(graph_nodes.csv, graph_edges.csv)를 읽고 같은 결과를 낸다.
-"""
+# 보행 도로망 그래프. RoadGraph.java 를 파이썬으로 옮긴 것
 
 import csv
 import heapq

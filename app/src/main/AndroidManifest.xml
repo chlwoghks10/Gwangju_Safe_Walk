@@ -10,6 +10,11 @@
     <!-- 긴급 시 보호자에게 위치 문자. 없으면 문자 앱을 열어 준다 -->
     <uses-permission android:name="android.permission.SEND_SMS" />
 
+    <!-- 화면을 꺼도 안내가 이어지게 한다 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- 이 선언이 없으면 안드로이드 11 이상에서 음성이 나오지 않는다 -->
     <queries>
         <intent>
@@ -85,6 +90,12 @@
             android:name=".SearchActivity"
             android:exported="false"
             android:windowSoftInputMode="stateVisible|adjustResize" />
+
+        <service
+            android:name=".GuideService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
     </application>
 
 </manifest>

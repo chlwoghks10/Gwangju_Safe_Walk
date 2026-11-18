@@ -1,11 +1,4 @@
-"""
-광주 안심길 — 경로 비교 API 서버
-
-실행
-    uvicorn main:app --host 0.0.0.0 --port 8000
-확인
-    http://<서버주소>:8000/docs
-"""
+# 경로 비교 API 서버. uvicorn main:app --host 0.0.0.0 --port 8000
 
 import os
 import time

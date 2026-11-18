@@ -4,18 +4,13 @@ import com.naver.maps.geometry.LatLng;
 
 import java.util.List;
 
-/** 경로 이탈 판정에 쓰는 거리 계산. */
+// 경로 이탈 판정에 쓰는 거리 계산
 public final class RouteGeometry {
     private RouteGeometry() {}
 
     private static final double M_PER_DEG_LAT = 111_320.0;
 
-    /**
-     * 점(lat, lon)에서 폴리라인까지의 최단 거리(m).
-     * 꼭짓점이 아니라 선분 위의 가장 가까운 점까지 잰다.
-     * 수백 m 이내의 거리에서는 등장방형 근사로 충분히 정확하다.
-     * 경로가 비어 있으면 NaN.
-     */
+    // 점에서 경로선까지의 최단 거리(m). 꼭짓점이 아니라 선분 위의 가장 가까운 점까지 잰다
     public static double distanceToPolylineM(double lat, double lon, List<LatLng> pts) {
         if (pts == null || pts.isEmpty()) return Double.NaN;
 
@@ -50,11 +45,7 @@ public final class RouteGeometry {
         return best;
     }
 
-    /**
-     * 현재 위치에서 경로 끝까지 경로를 따라 남은 거리(m).
-     * 경로에서 가장 가까운 선분 위의 점을 기준으로 그 뒤쪽 길이를 더한다.
-     * 경로가 비어 있으면 NaN.
-     */
+    // 경로를 따라 도착지까지 남은 거리(m)
     public static double remainingAlongM(double lat, double lon, List<LatLng> pts) {
         if (pts == null || pts.isEmpty()) return Double.NaN;
         if (pts.size() == 1) return 0;

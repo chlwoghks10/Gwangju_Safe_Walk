@@ -20,7 +20,7 @@ import androidx.core.content.ContextCompat;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 긴급 시 연락할 보호자. 폰에만 저장하고 서버로 보내지 않는다. */
+// 긴급 시 연락할 보호자. 폰에만 저장하고 서버로 보내지 않는다
 public class Guardians {
 
     private static final String PREF = "safewalk";
@@ -61,7 +61,7 @@ public class Guardians {
                 .edit().putString(KEY, b.toString()).apply();
     }
 
-    /** 더보기 화면에 보여 줄 한 줄 */
+    // 더보기 화면에 보여 줄 한 줄
     public static String summary(Context c) {
         List<Person> g = load(c);
         if (g.isEmpty()) return "등록 안 됨";
@@ -69,7 +69,7 @@ public class Guardians {
         return g.get(0).name + " 외 " + (g.size() - 1) + "명";
     }
 
-    /** 실제로 문자를 보내지 않고 화면에만 띄우는 시험 모드 */
+    // 실제로 문자를 보내지 않고 화면에만 띄우는 시험 모드
     public static boolean isTestMode(Context c) {
         return c.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY_TEST, true);
     }
@@ -79,7 +79,7 @@ public class Guardians {
                 .edit().putBoolean(KEY_TEST, on).apply();
     }
 
-    /** 보호자를 넣고 빼는 창. 끝나면 after 를 부른다 */
+    // 보호자를 넣고 빼는 창
     public static void edit(final Activity a, final Runnable after) {
         List<Person> now = load(a);
 

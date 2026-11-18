@@ -22,11 +22,7 @@ import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * 이상 판정을 받은 뒤의 처리.
- * 확인 창 15초 -> 무응답이면 보호자에게 문자 -> 보호자가 전화를 건다.
- * 전화는 사용자가 직접 누를 때만 건다. 쓰러진 사람은 전화를 받지 못하기 때문이다.
- */
+// 이상 판정을 받은 뒤의 처리. 확인 창을 띄우고, 응답이 없으면 보호자에게 문자를 보낸다
 public class Emergency {
 
     private static final String TAG = "Emergency";
@@ -40,7 +36,7 @@ public class Emergency {
     // 같은 보호자에게 문자를 다시 보내기까지 최소 간격
     private static final long SMS_GAP_MS = 2 * 60 * 1000L;
 
-    /** 사용자가 "괜찮아요" 를 눌렀을 때 서버에도 알리기 위한 통로 */
+    // 사용자가 괜찮아요를 눌렀을 때 서버에도 알리기 위한 통로
     public interface Listener {
         void onUserOk();
     }
@@ -68,12 +64,17 @@ public class Emergency {
         this.listener = l;
     }
 
-    /**
-     * 서버가 이상이라고 알려 오면 부른다.
-     * 창을 띄우지 않기로 했으면 false 를 돌려주니, 부른 쪽이 서버도 초기화해야 한다.
-     */
+    // 좌표를 주소로 바꾼 결과. 늦게 들어와도 된다
+    public void setPlace(String place) {
+        if (current != null && place != null && !place.trim().isEmpty()) {
+            current.place = place.trim();
+        }
+    }
+
+    // 창을 띄우지 않기로 하면 false 를 돌려준다. 그때는 부른 쪽이 서버도 초기화해야 한다
     public boolean handle(Anomaly a) {
         if (a == null) return false;
+        if (gone()) return false;                                    // 화면이 이미 없어짐
         if (running) return false;                                   // 이미 처리 중
         if (SystemClock.elapsedRealtime() < blockedUntil) return false;  // 방금 취소함
         if (Guardians.load(act).isEmpty()) {
@@ -87,9 +88,9 @@ public class Emergency {
         return true;
     }
 
-    /** 서버가 보호자 알림 단계라고 알려 왔을 때. 앱 타이머보다 이쪽이 먼저일 수 있다 */
+    // 서버가 보호자 알림 단계라고 알려 왔을 때
     public void alertNow() {
-        if (alerted || current == null) return;
+        if (alerted || current == null || gone()) return;
         stopTicker();
         closeDialog();
         alert();
@@ -102,8 +103,6 @@ public class Emergency {
         closeDialog();
         running = false;
     }
-
-    // ── 1단계: 사용자에게 먼저 묻는다 ────────────────────────────────
 
     private void askUser() {
         say("이상 상황이 감지되었습니다. 괜찮으시면 괜찮아요를 눌러 주세요.");
@@ -149,8 +148,6 @@ public class Emergency {
                 + sec + "초 뒤에 보호자에게 위치를 보냅니다.";
     }
 
-    // ── 2단계: 결과에 따라 갈린다 ────────────────────────────────────
-
     private void onSafe() {
         stopTicker();
         closeDialog();
@@ -174,6 +171,7 @@ public class Emergency {
 
     private void onNoAnswer() {
         closeDialog();
+        if (gone()) { running = false; return; }
         if (current.level < Anomaly.LEVEL_ALERT) {
             running = false;
             blockedUntil = SystemClock.elapsedRealtime() + COOLDOWN_MS;
@@ -199,8 +197,6 @@ public class Emergency {
                 .show();
     }
 
-    // ── 보호자에게 알리기 ────────────────────────────────────────────
-
     private void alert() {
         boostRinger();
         sendToAll(message(), alerted);
@@ -211,11 +207,15 @@ public class Emergency {
     private String message() {
         Calendar c = Calendar.getInstance();
         c.setTimeInMillis(current.atMs);
+        String where = (current.place == null || current.place.isEmpty())
+                ? String.format(Locale.US, "%.5f, %.5f", current.lat, current.lon)
+                : current.place + " 부근";
         return String.format(Locale.KOREA,
-                "[광주 안심길] 이상 상황이 감지되었습니다.\n%s\n%d/%d %02d:%02d\n%s\n→ 지금 전화해 주세요. 받지 않으면 112에 신고해 주세요.",
+                "[광주 안심길] 이상 상황이 감지되었습니다.\n%s\n%d/%d %02d:%02d · %s\n%s\n→ 지금 전화해 주세요. 받지 않으면 112에 신고해 주세요.",
                 current.text(),
                 c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH),
                 c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE),
+                where,
                 mapLink(current.lat, current.lon));
     }
 
@@ -224,7 +224,7 @@ public class Emergency {
                 "https://map.naver.com/v5/?c=%.5f,%.5f,17,0,0,0,dh", lon, lat);
     }
 
-    /** repeat 이면 2분 간격 제한을 받는다. 첫 알림과 해제 문자는 항상 보낸다 */
+    // repeat 이면 2분 간격 제한을 받는다. 첫 알림과 해제 문자는 항상 보낸다
     private void sendToAll(final String text, boolean repeat) {
         List<Guardians.Person> g = Guardians.load(act);
         if (g.isEmpty()) {
@@ -324,8 +324,6 @@ public class Emergency {
         }
     }
 
-    // ── 전화는 사용자가 누를 때만 ────────────────────────────────────
-
     private void showCallOptions() {
         running = false;
         blockedUntil = SystemClock.elapsedRealtime() + COOLDOWN_MS;
@@ -362,7 +360,11 @@ public class Emergency {
         }
     }
 
-    // ── 자잘한 것들 ──────────────────────────────────────────────────
+    // 화면이 없어진 뒤에 창을 띄우려 하면 앱이 죽는다
+    private boolean gone() {
+        if (act == null || act.isFinishing()) return true;
+        return android.os.Build.VERSION.SDK_INT >= 17 && act.isDestroyed();
+    }
 
     private void say(String text) {
         if (voice != null) voice.say(text, true);
@@ -380,7 +382,7 @@ public class Emergency {
         }
     }
 
-    /** 시연용. 서버 판정 없이 흐름만 돌려 본다 */
+    // 시연용. 서버 판정 없이 흐름만 돌려 본다
     public void test(double lat, double lon) {
         handle(new Anomaly("정지", "5분째 같은 자리에 머물러 있습니다",
                 Anomaly.LEVEL_ALERT, lat, lon));

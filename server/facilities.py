@@ -1,13 +1,4 @@
-"""
-경로 주변 안전시설 조회.
-
-앱 assets 와 같은 GeoJSON 을 읽어, 경로 꺾은선에서 MATCH_RADIUS 미터 안에 있는
-시설을 찾아 돌려준다. 그래프를 만들 때와 같은 방식(점-선분 최단거리)이다.
-
-주의 — 그래프의 cctv/light 값은 간선마다 따로 센 것이라, 경로 전체로 합하면
-인접 간선에 걸친 시설이 여러 번 세어진다. 여기서는 중복을 제거한 고유 개수를
-돌려주므로 지도에 표시되는 시설 수와 카드의 숫자가 일치한다.
-"""
+# 경로 주변 안전시설 조회. 간선마다 세면 겹치니 고유 개수로 돌려준다
 
 import json
 import math
@@ -49,7 +40,7 @@ class Facilities:
             xy = [_to_meters(la, lo) for la, lo, _ in pts]
             self._xy[key] = xy
 
-            # 격자 색인 — 전체를 훑지 않고 주변 칸만 보기 위한 것
+            # 격자 색인. 전체를 훑지 않고 주변 칸만 본다
             grid: Dict[Tuple[int, int], List[int]] = {}
             for i, (x, y) in enumerate(xy):
                 grid.setdefault((int(x // _CELL), int(y // _CELL)), []).append(i)
@@ -83,10 +74,7 @@ class Facilities:
 
     def near_polyline(self, poly: List[List[float]],
                       radius: float = MATCH_RADIUS) -> Dict[str, List[List[float]]]:
-        """
-        꺾은선 주변 시설을 종류별로 중복 없이 돌려준다.
-        반환: {"cctv": [[lat, lon, cnt], ...], ...}
-        """
+        """꺾은선 주변 시설을 종류별로 중복 없이 돌려준다."""
         if len(poly) < 2:
             return {k: [] for k in self.layers}
 
